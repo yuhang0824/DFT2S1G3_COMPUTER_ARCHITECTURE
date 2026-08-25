@@ -4,19 +4,22 @@
 	
 	msgPromtSelectPage DB 13,10,"1.Login",13,10,"2.Exit",13,10,"Enter number to choice: $"
 	msgPromtMemberID DB 13,10,"MemberID(M0000): $"
+	msgPromtPassword DB 13,10,"Password(5 Digit): $"
 	
-	MemberID_INPUT DB 5 DUP(?)
-	Password_INPUT DB 5 DUP(?)
+	ERRORMSG1 DB 13,10,"WRONG Choice $"
+	ERRORMSG2 DB 13,10,"WRONG ID $"
+	ERRORMSG3 DB 13,10,"WRONG PASSWORD $"
+	ERRORMSG4 DB 13,10,"Too many wrong attempts! Returning to Menu.$"
 	
-	MemberID_FILE DB 5 DUP(?)
-	Password_FILE DB 5 DUP(?)
+	RETRY_COUNT DB 3  ; 专属的重试计数器
 	
-	CHOICE DB ?
+	MemberID_INPUT DB 5 DUP(?) ;member input
+	Password_INPUT DB 5 DUP(?) ;member input
 	
-    fileName DB 'account.txt', 0
-    logMsg DB 'M0001,12345', 13, 10
-    msgLen DW 9
-    fileHandle DW ?
+	MemberID_FILE DB 5 DUP(?) ;file data
+	Password_FILE DB 5 DUP(?) ;file data
+	
+	CHOICE DB ? ;member choice
 	
 	buffer DB 5120 DUP(?)       ; 预留 100 个字节的空白房间来装数据
 	
@@ -27,10 +30,10 @@
 	msgAvg DB 13,10,		'Average      : $'
 	msgGrade DB 13,10,		'Grade        : $'
 		
-	ERRORMSG1 DB 13,10,"WRONG ID $"
-	ERRORMSG2 DB 13,10,"WRONG Choice $"
-	ERRORMSG3 DB 13,10,"Too many wrong attempts! Returning to Menu.$"
-	RETRY_COUNT DB 3  ; 专属的重试计数器
+	fileName DB 'account.txt', 0		;save file name
+    logMsg DB 'M0001,12345', 13, 10		;first time use will create basic data
+    msgLen DW 11						;logMsg how long
+    fileHandle DW ?						;when using file service need handle the file key
 	
 	SPACE DB " $"
 	NL DB 10,13,'$'
@@ -57,7 +60,7 @@ SELECT_PAGE:
 	INT 21H
 	
 	CMP CHOICE,"1"
-	JE PREPARE_LOGIN  ; [修改 1] 不要直接跳去 LOGIN，先去初始化计数器！
+	JE PREPARE_LOGIN  
 	
 	CMP CHOICE, '2'
 	JNE WRONG_CHOICE
@@ -65,14 +68,15 @@ SELECT_PAGE:
 
 WRONG_CHOICE:
 	MOV AH,09H
-	LEA DX,ERRORMSG2
+	LEA DX,ERRORMSG1
 	INT 21H
 	JMP SELECT_PAGE
 		
 PREPARE_LOGIN:
 	MOV RETRY_COUNT, 3    ; 每次从菜单进入登录时，都把机会重置为 3 次
+	;continue and direct go LOGIN_ID_PAGE
 	
-LOGIN_PAGE:
+LOGIN_ID_PAGE:
 	MOV AH,09H
 	LEA DX,msgPromtMemberID
 	INT 21H
@@ -109,21 +113,21 @@ LOGIN_PAGE:
     LEA DI, MemberID_FILE
     MOV CX, 100          ; 设定最大扫描限制
 
-SCAN_LOOP:
+SCAN_LOOP_ID:            ; [修复] 重命名标签避免重复
     MOV AL, [SI]
     CMP AL, ','
-    JE  COMMA_FOUND
+    JE  COMMA_FOUND_ID
     CMP AL, '$'
-    JE  END_OF_DATA
+    JE  END_OF_DATA1
     
     MOV [DI], AL
     INC DI
     INC SI
-    LOOP SCAN_LOOP
+    LOOP SCAN_LOOP_ID
 
-COMMA_FOUND:
+COMMA_FOUND_ID:
     MOV BYTE PTR [DI], '$'
-    JMP END_OF_DATA      ; 提取成功，跳去比对环节
+    JMP END_OF_DATA1      ; 提取成功，跳去比对环节
 
 ERROR_OPEN:
     ; (如果文件不存在，就在这里创建它)
@@ -142,51 +146,115 @@ ERROR_OPEN:
     MOV AH, 3EH
     MOV BX, fileHandle
     INT 21H
-    JMP LOGIN_PAGE       ; 创建完返回重新登录
+    JMP LOGIN_ID_PAGE      ; [修复] 修正标签名为 LOGIN_ID_PAGE
 
-END_OF_DATA:
-    ; [修正] 5 个字母连续对比
+END_OF_DATA1:
+    ; 5 个字母连续对比 ID
     LEA SI, MemberID_INPUT
     LEA DI, MemberID_FILE
     MOV CX, 5            ; 循环 5 次对比 5 个字母
 
-COMPARE_LOOP:
+COMPARE_LOOP1:
     MOV AL, [SI]
     CMP AL, [DI]
     JNE ACCOUNT_WRONG    ; 只要有一个字母错，立刻跳去报错！
     
     INC SI
     INC DI
-    LOOP COMPARE_LOOP
+    LOOP COMPARE_LOOP1
 
-    ; [修正] 如果代码能走到这里（没有跳去 ACCOUNT_WRONG），说明全对！
-    ; 打印成功信息！
-    MOV AH, 09H
-    LEA DX, msgReport    ; 这里借用你的报表头假装登录成功界面
-    INT 21H
-    JMP FIN              ; 成功后跳去程序结束 (或者可以跳去你的 Main Menu)
+    ; 全对！跳去密码页面
+	MOV RETRY_COUNT, 3 ;REFRESH
+	JMP LOGIN_PASSWORD_PAGE
 
 ACCOUNT_WRONG:
 	DEC RETRY_COUNT      ; 机会减 1
 	CMP RETRY_COUNT, 0   ; 检查机会是不是变成 0 了？
 	JE  TOO_MANY_TRIES   ; 如果是 0，跳去惩罚区
 
-	; 如果还没到 0，正常报错，并重新跳回 LOGIN_PAGE
     MOV AH, 09H
-    LEA DX, ERRORMSG1
+    LEA DX, ERRORMSG2
     INT 21H
-    JMP LOGIN_PAGE       ; 报错后返回重新登录
+    JMP LOGIN_ID_PAGE
+
+
+;================================================= PASSWORD =================================================
+LOGIN_PASSWORD_PAGE:
+	MOV AH,09H
+	LEA DX,msgPromtPassword
+	INT 21H
+	CALL READ_PASSWORD
+
+    ; ===== 提取逗号后的 Password =====
+    LEA SI, buffer
+    LEA DI, Password_FILE
+    MOV CX, 100          ; 设定最大扫描限制
+
+SCAN_LOOP_PASS:
+    MOV AL, [SI]
+	CMP AL,','
+	JE SAVE_READY
+    INC SI
+    LOOP SCAN_LOOP_PASS  ; 一直找，直到找到逗号
+	
+SAVE_READY:
+    INC SI
+	MOV CX,5
+	
+SAVE_PASS:
+    MOV AL, [SI]
+    MOV [DI], AL
+    INC DI
+    INC SI
+    LOOP SAVE_PASS
+
+    MOV BYTE PTR [DI], '$'
+    JMP END_OF_DATA2      
+    
+END_OF_DATA2:
+   
+    LEA SI, Password_INPUT
+    LEA DI, Password_FILE
+    MOV CX, 5            ; 循环 5 次对比 5 个字母
+
+COMPARE_LOOP2:
+    MOV AL, [SI]
+    CMP AL, [DI]
+    JNE PASSWORD_WRONG   ; 只要有一个字母错，立刻跳去报错！
+    
+    INC SI
+    INC DI
+    LOOP COMPARE_LOOP2
+	
+    ; === 密码也全对！程序成功登录，跳转到结束或者报表区 ===
+    JMP MAIN_MENU 
+
+PASSWORD_WRONG:
+	DEC RETRY_COUNT      ; 机会减 1
+	CMP RETRY_COUNT, 0   ; 检查机会是不是变成 0 了？
+	JE  TOO_MANY_TRIES   ; 如果是 0，跳去惩罚区
+
+    MOV AH, 09H
+    LEA DX, ERRORMSG3    ; (可以用不同的报错信息)
+    INT 21H
+    JMP LOGIN_PASSWORD_PAGE  ; 密码错了重新输入密码
 
 TOO_MANY_TRIES:
 	; 机会用尽，打印提示并踢回主菜单
 	MOV AH, 09H
-	LEA DX, ERRORMSG3
+	LEA DX, ERRORMSG4
 	INT 21H
 	JMP SELECT_PAGE
+;================================================= MAIN MENU =================================================
+MAIN_MENU:
+	MOV AH,09H
+	LEA DX,msgReport
+	INT 21H
 	
 FIN:
     MOV AX, 4C00H
     INT 21H
+	
 MAIN ENDP
 
 ;==========================================================
@@ -202,4 +270,16 @@ READ_U:
     RET
 READ_USERNAME ENDP
 	
+READ_PASSWORD PROC
+    LEA SI, Password_INPUT ; [致命修复] 之前错写成了 MemberID_INPUT！
+    MOV CX, 5
+READ_P:                  ; [修复] 标签不能和上面的 READ_U 重复
+    MOV AH, 01H
+    INT 21H
+    MOV [SI], AL
+    INC SI
+    LOOP READ_P
+    RET
+READ_PASSWORD ENDP
+
 END MAIN
