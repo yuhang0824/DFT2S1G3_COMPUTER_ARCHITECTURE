@@ -5,22 +5,23 @@
 	msgPromtSelectPage DB 13,10
 		DB '=======================================',13,10
 		DB '1. Login',13,10
+		DB '2. Register',13,10
 		DB '0. Exit',13,10
 		DB '=======================================',13,10
 		DB 'Enter number to choose: $'
 	
 	;==================================================================================================================
-	
+		
 	msgPromtSelectFunction DB 13,10
 		DB '=======================================',13,10
 		DB '       WELCOME TO LIBRARY SYSTEM       ',13,10
 		DB '=======================================',13,10
-		DB '1. Borrow Book',13,10                   ; 借书
-		DB '2. Return Book / Pay Fine',13,10        ; 还书与罚款
-		DB '3. Member Top-up',13,10                 ; 会员充值
-		DB '4. Daily Summary Report',13,10          ; 今日营业报表
-		DB '5. Logout',13,10                        ; 登出返回上一层
-		DB '0. Exit System',13,10                   ; 彻底退出
+		DB '1. Borrow Book',13,10
+		DB '2. Return Book / Pay Fine',13,10
+		DB '3. Member Top-up',13,10
+		DB '4. Daily Summary Report',13,10
+		DB '5. Logout',13,10
+		DB '0. Exit System',13,10
 		DB '=======================================',13,10
 		DB 'Please enter your choice (1-5): $'
 		
@@ -28,10 +29,10 @@
 	
 	;==================================================================================================================
 	
-	TotalBooks 	  DB 0     ; 记录今天总共借出的书数量 (初始为0)
-	TotalFine     DB 0     ; 今日逾期收取的总罚款 (初始为0)
-	TotalRevenue  DB 0     ; 记录今天总共收取的金额 (初始为0)
-	MemberBalance DB 50    ; 当前会员余额 (暂时预设为50，方便测试，后续可做文件读取)
+	TotalBooks 	  DB 0     ; 借出书总数
+	TotalFine     DB 0     ; 罚款总额
+	TotalRevenue  DB 0     ; 总收入
+	MemberBalance DB 50    ; 会员余额
 
 	msgRepTitle DB 13,10,13,10,13,10,'===== DAILY SUMMARY REPORT =====$'
 	msgRepBooks DB 13,10,'Total Books Borrowed : $'
@@ -39,7 +40,7 @@
 	msgRepRev   DB 13,10,'Total Revenue (RM)   : $'
 	msgRepLine  DB 13,10,'================================$'
 	
-	;================================================= Promt ==========================================================
+	;================================================= Prompts ========================================================
 
 	msgPromtMemberID DB 13,10,'MemberID(M0000): $'
 	msgPromtPassword DB 13,10,'Password(5 Digit): $'
@@ -48,7 +49,7 @@
 	msgPromtTopup    DB 13,10,'Enter Top-up amount RM (01-99): $'
 	msgReceiptEnd 	 DB 13,10,'Thank you!$'
 	msgInvalidNum 	 DB 13,10,'Invalid input! Only numbers 0-9 allowed.$'
-	msgOverflow   	 DB 13,10,'Exceeds maximum limit (RM 255)!$'
+	msgOverflow      DB 13,10,'Exceeds maximum limit (RM 255)!$'
 	
 	msgNoMoney 		 DB 13,10,13,10,'Insufficient balance! Please go to Top-up (Menu 3).$'
 	msgBalanceShow 	 DB 13,10,13,10,'Current Balance: RM $'
@@ -57,42 +58,41 @@
 	msgTopupSuccess  DB 13,10,13,10,'=== TOP-UP SUCCESS ===$'
 	
 	msgReceipt 		 DB 13,10,13,10,'=== BORROW SUCCESS ==='
-						   DB 13,10,'Please pay RM $'
+					 DB 13,10,'Please pay RM $'
 				 
 	msgReturnSuccess DB 13,10,13,10,'=== BOOK RETURNED ==='
-						   DB 13,10,'Successfully! No fine.$'
+					 DB 13,10,'Successfully! No fine.$'
 					 
 	msgFinePaid      DB 13,10,13,10,'=== LATE RETURN ==='
-						   DB 13,10,'Fine deducted: RM $'
-					 
-	;================================================= Error msg ======================================================
+					 DB 13,10,'Fine deducted: RM $'
+	
+	; Register prompts
+	msgRegisterTitle DB 13,10,13,10,'=== MEMBER REGISTRATION ===$'
+	msgRegSuccess    DB 13,10,13,10,'Registration successful!$'
+	msgRegFail       DB 13,10,13,10,'Registration failed (File Error)!$'
+	
+	;================================================= Error Messages =================================================
 
 	ERRORMSG1 DB 13,10,'WRONG Choice $'
-	ERRORMSG2 DB 13,10,'WRONG ID $'
+	ERRORMSG2 DB 13,10,'WRONG ID OR PASSWORD $'
 	ERRORMSG3 DB 13,10,'WRONG PASSWORD $'
 	ERRORMSG4 DB 13,10,'Too many wrong attempts! Returning to Menu.$'
 	ERRORMSG5 DB 13,10,"Invalid input! Must be 1 to 9.$"
 	
-	;================================================= Input Variable =================================================
+	;================================================= Buffers & File Variables =======================================
 
 	MemberID_INPUT DB 5 DUP(?)
 	Password_INPUT DB 5 DUP(?)
+	RegRecord      DB 13 DUP(?)
+	buffer         DB 512 DUP(?)
 	
-	;================================================= File Variable ==================================================
+	fileName   DB 'account.txt', 0
+	logMsg     DB 'M0001,12345', 13, 10
+	msgLen     DW 13
+	fileHandle DW ?
 	
-	MemberID_FILE DB 5 DUP(?) ;file data
-	Password_FILE DB 5 DUP(?) ;file data
-	
-	buffer DB 5120 DUP(?)       ; 预留 100 个字节的空白房间来装数据
-	
-	fileName DB 'account.txt', 0		;save file name
-    logMsg DB 'M0001,12345', 13, 10		;first time use will create basic data
-    msgLen DW 11						;logMsg how long
-    fileHandle DW ?						;when using file service need handle the file key
-	
-	;================================================= Other Variable =================================================
-	RETRY_COUNT DB 3
-	; 0=Normal, 1=Input Invalid, 2=can't process
+	;================================================= Other Variables ================================================
+	RETRY_COUNT   DB 3
 	CHOICE_STATUS DB 0
 	BORROW_STATUS DB 0 
 	RETURN_STATUS DB 0
@@ -103,20 +103,20 @@
 .CODE
 MAIN PROC
 	MOV AX, @DATA
-	MOV DS,AX
+	MOV DS, AX
 	
 SELECT_PAGE:
 	CALL CLEAR_SCREEN
 	
-	CMP CHOICE_STATUS,1
-	JE  DISPLAY_ERROR
+	CMP CHOICE_STATUS, 1
+	JE  DO_DISPLAY_ERR
 	JMP SHOW_MENU
 
-DISPLAY_ERROR:
+DO_DISPLAY_ERR:
 	MOV AH, 09H
 	LEA DX, ERRORMSG1
 	INT 21H
-	MOV CHOICE_STATUS,0   
+	MOV CHOICE_STATUS, 0   
 
 SHOW_MENU:
 	MOV AH, 09H
@@ -127,16 +127,30 @@ SHOW_MENU:
 	INT 21H
 	MOV CHOICE, AL
 	
-	; NEW LINE
 	MOV AH, 09H
 	LEA DX, NL
 	INT 21H
 	
 	CMP CHOICE, "1"
-	JE PREPARE_LOGIN  
+	JE  GO_LOGIN
+	
+	CMP CHOICE, '2'
+	JE  GO_REGISTER
 	
 	CMP CHOICE, '0'
-	JNE WRONG_CHOICE
+	JE  GO_FIN
+	
+	MOV CHOICE_STATUS, 1
+	JMP SELECT_PAGE
+
+GO_LOGIN:
+	JMP PREPARE_LOGIN
+
+GO_REGISTER:
+	CALL REGISTER_MEMBER
+	JMP SELECT_PAGE
+
+GO_FIN:
 	JMP FIN
 
 WRONG_CHOICE:
@@ -145,176 +159,145 @@ WRONG_CHOICE:
 
 PREPARE_LOGIN:
 	CALL CLEAR_SCREEN
-	MOV RETRY_COUNT, 3    ; 每次从菜单进入登录时，都把机会重置为 3 次
-	
+	MOV RETRY_COUNT, 3
+
 LOGIN_ID_PAGE:
-	MOV AH,09H
-	LEA DX,msgPromtMemberID
+	MOV AH, 09H
+	LEA DX, msgPromtMemberID
 	INT 21H
 	CALL READ_USERNAME
 
-    ; ===== 1. 打开文件 =====
-    MOV AH, 3DH
-    MOV AL, 0
-    LEA DX, fileName
-    INT 21H
-    JC ERROR_OPEN
-    MOV fileHandle, AX
-
-    ; ===== 2. 读取文件 =====
-    MOV AH, 3FH
-    MOV BX, fileHandle
-    MOV CX, 100         ; 读 100 个字够了
-    LEA DX, buffer
-    INT 21H
-
-    ; ===== 3. 处理读取到的内容 =====
-    ; 此时 AX 是读取到的真实长度
-    LEA SI, buffer
-    ADD SI, AX
-    MOV BYTE PTR [SI], '$' ; 封口
-	
-    ; ===== 4. 关闭文件 =====
-    MOV AH, 3EH
-    MOV BX, fileHandle
-    INT 21H
-
-    ; ===== 5. 提取逗号前的 ID =====
-    LEA SI, buffer
-    LEA DI, MemberID_FILE
-    MOV CX, 100          ; 设定最大扫描限制
-
-SCAN_LOOP_ID:
-    MOV AL, [SI]
-    CMP AL, ','
-    JE  COMMA_FOUND_ID
-    CMP AL, '$'
-    JE  END_OF_DATA1
-    
-    MOV [DI], AL
-    INC DI
-    INC SI
-    LOOP SCAN_LOOP_ID
-
-COMMA_FOUND_ID:
-    MOV BYTE PTR [DI], '$'
-    JMP END_OF_DATA1      ; 提取成功，跳去比对环节
-
-ERROR_OPEN:
-    ; (如果文件不存在，就在这里创建它)
-    MOV AH, 3CH
-    MOV CX, 0
-    LEA DX, fileName
-    INT 21H
-    MOV fileHandle, AX	
-
-    MOV AH, 40H
-    MOV BX, fileHandle
-    MOV CX, msgLen
-    LEA DX, logMsg
-    INT 21H
-    
-    MOV AH, 3EH
-    MOV BX, fileHandle
-    INT 21H
-    JMP LOGIN_ID_PAGE
-
-END_OF_DATA1:
-    ; 5 个字母连续对比 ID
-    LEA SI, MemberID_INPUT
-    LEA DI, MemberID_FILE
-    MOV CX, 5            ; 循环 5 次对比 5 个字母
-
-COMPARE_LOOP1:
-    MOV AL, [SI]
-    CMP AL, [DI]
-    JNE ACCOUNT_WRONG    ; 只要有一个字母错，立刻跳去报错！
-    
-    INC SI
-    INC DI
-    LOOP COMPARE_LOOP1
-
-    ; 全对！跳去密码页面
-	MOV RETRY_COUNT, 3 ;REFRESH
-	JMP LOGIN_PASSWORD_PAGE
-
-ACCOUNT_WRONG:
-	DEC RETRY_COUNT      ; 机会减 1
-	CMP RETRY_COUNT, 0   ; 检查机会是不是变成 0 了？
-	JE  TOO_MANY_TRIES   ; 如果是 0，跳去惩罚区
-
-    MOV AH, 09H
-    LEA DX, ERRORMSG2
-    INT 21H
-    JMP LOGIN_ID_PAGE
-
-
-;================================================= PASSWORD =================================================
-LOGIN_PASSWORD_PAGE:
-	MOV AH,09H
-	LEA DX,msgPromtPassword
+	MOV AH, 09H
+	LEA DX, msgPromtPassword
 	INT 21H
 	CALL READ_PASSWORD
 
-    ; ===== 提取逗号后的 Password =====
-    LEA SI, buffer
-    LEA DI, Password_FILE
-    MOV CX, 100          ; 设定最大扫描限制
+	; 1. Open File
+	MOV AH, 3DH
+	MOV AL, 0
+	LEA DX, fileName
+	INT 21H
+	JNC OPEN_FILE_OK
+	JMP ERROR_OPEN
 
-SCAN_LOOP_PASS:
-    MOV AL, [SI]
-	CMP AL,','
-	JE SAVE_READY
-    INC SI
-    LOOP SCAN_LOOP_PASS  ; 一直找，直到找到逗号
+OPEN_FILE_OK:
+	MOV fileHandle, AX
+
+	; 2. Read entire file into buffer
+	MOV AH, 3FH
+	MOV BX, fileHandle
+	MOV CX, 500
+	LEA DX, buffer
+	INT 21H
+	PUSH AX                  ; Save total bytes read
 	
-SAVE_READY:
-    INC SI
-	MOV CX,5
-	
-SAVE_PASS:
-    MOV AL, [SI]
-    MOV [DI], AL
-    INC DI
-    INC SI
-    LOOP SAVE_PASS
+	; Close File Handle
+	MOV AH, 3EH
+	MOV BX, fileHandle
+	INT 21H
+	POP CX                   ; CX = bytes read
 
-    MOV BYTE PTR [DI], '$'
-    JMP END_OF_DATA2      
-    
-END_OF_DATA2:
-   
-    LEA SI, Password_INPUT
-    LEA DI, Password_FILE
-    MOV CX, 5            ; 循环 5 次对比 5 个字母
+	CMP CX, 0
+	JNE START_PARSER
+	JMP AUTH_FAIL
 
-COMPARE_LOOP2:
-    MOV AL, [SI]
-    CMP AL, [DI]
-    JNE PASSWORD_WRONG   ; 只要有一个字母错，立刻跳去报错！
-    
-    INC SI
-    INC DI
-    LOOP COMPARE_LOOP2
-	
-    ; === 密码也全对！程序成功登录，跳转到结束或者报表区 ===
-    JMP MAIN_MENU 
+START_PARSER:
+	LEA SI, buffer
 
-PASSWORD_WRONG:
-	DEC RETRY_COUNT      ; 机会减 1
-	CMP RETRY_COUNT, 0   ; 检查机会是不是变成 0 了？
-	JE  TOO_MANY_TRIES   ; 如果是 0，跳去惩罚区
+CHECK_NEXT_RECORD:
+	CMP CX, 11
+	JAE COMPARE_RECORD_FIELDS
+	JMP AUTH_FAIL
 
-    MOV AH, 09H
-    LEA DX, ERRORMSG3    ; (可以用不同的报错信息)
-    INT 21H
-    JMP LOGIN_PASSWORD_PAGE  ; 密码错了重新输入密码
+COMPARE_RECORD_FIELDS:
+	; Compare ID (5 bytes)
+	LEA DI, MemberID_INPUT
+	PUSH CX
+	PUSH SI
+	MOV CX, 5
+COMPARE_REC_ID:
+	MOV AL, [SI]
+	CMP AL, [DI]
+	JNE RECORD_MISMATCH
+	INC SI
+	INC DI
+	LOOP COMPARE_REC_ID
+
+	; Verify comma separator
+	CMP BYTE PTR [SI], ','
+	JNE RECORD_MISMATCH
+	INC SI
+
+	; Compare Password (5 bytes)
+	LEA DI, Password_INPUT
+	MOV CX, 5
+COMPARE_REC_PASS:
+	MOV AL, [SI]
+	CMP AL, [DI]
+	JNE RECORD_MISMATCH
+	INC SI
+	INC DI
+	LOOP COMPARE_REC_PASS
+
+	; Success -> Go to Main Menu
+	POP SI
+	POP CX
+	JMP GO_TO_MAIN_MENU
+
+GO_TO_MAIN_MENU:
+	JMP MAIN_MENU
+
+RECORD_MISMATCH:
+	POP SI
+	POP CX
+
+SKIP_LINE:
+	MOV AL, [SI]
+	INC SI
+	DEC CX
+	JZ  AUTH_FAIL_BRIDGE
+	CMP AL, 10
+	JNE SKIP_LINE
+	JMP CHECK_NEXT_RECORD
+
+AUTH_FAIL_BRIDGE:
+	JMP AUTH_FAIL
+
+AUTH_FAIL:
+	DEC RETRY_COUNT
+	JZ  TOO_MANY_TRIES_BRIDGE
+
+	MOV AH, 09H
+	LEA DX, ERRORMSG2
+	INT 21H
+	JMP LOGIN_ID_PAGE
+
+TOO_MANY_TRIES_BRIDGE:
+	JMP TOO_MANY_TRIES
+
+ERROR_OPEN:
+	MOV AH, 3CH
+	MOV CX, 0
+	LEA DX, fileName
+	INT 21H
+	MOV fileHandle, AX
+
+	MOV AH, 40H
+	MOV BX, fileHandle
+	MOV CX, msgLen
+	LEA DX, logMsg
+	INT 21H
+
+	MOV AH, 3EH
+	MOV BX, fileHandle
+	INT 21H
+	JMP LOGIN_ID_PAGE
 
 TOO_MANY_TRIES:
-	; 机会用尽，打印提示并踢回主菜单
 	MOV AH, 09H
 	LEA DX, ERRORMSG4
 	INT 21H
+	CALL WAIT_KEY
 	JMP SELECT_PAGE
 ;================================================= MAIN MENU =================================================
 MAIN_MENU:
@@ -399,6 +382,113 @@ FIN:
 MAIN ENDP
 
 ; ==========================================================
+; Register Member: Appends "ID,Password\r\n" to account.txt
+; ==========================================================
+REGISTER_MEMBER PROC
+	CALL CLEAR_SCREEN
+	
+	MOV AH, 09H
+	LEA DX, msgRegisterTitle
+	INT 21H
+
+	; 1. Read Member ID (5 chars)
+	MOV AH, 09H
+	LEA DX, msgPromtMemberID
+	INT 21H
+	CALL READ_USERNAME
+
+	; 2. Read Password (5 chars)
+	MOV AH, 09H
+	LEA DX, msgPromtPassword
+	INT 21H
+	CALL READ_PASSWORD
+
+	; 3. Format buffer: [ID:5] + [','] + [Pass:5] + [0DH] + [0AH]
+	LEA DI, RegRecord
+	LEA SI, MemberID_INPUT
+	MOV CX, 5
+COPY_REG_ID:
+	MOV AL, [SI]
+	MOV [DI], AL
+	INC SI
+	INC DI
+	LOOP COPY_REG_ID
+	
+	MOV BYTE PTR [DI], ','
+	INC DI
+	
+	LEA SI, Password_INPUT
+	MOV CX, 5
+COPY_REG_PASS:
+	MOV AL, [SI]
+	MOV [DI], AL
+	INC SI
+	INC DI
+	LOOP COPY_REG_PASS
+	
+	MOV BYTE PTR [DI], 13      ; CR
+	INC DI
+	MOV BYTE PTR [DI], 10      ; LF
+	
+	; 4. Open account.txt (Read/Write Access: AL = 2)
+	MOV AH, 3DH
+	MOV AL, 2
+	LEA DX, fileName
+	INT 21H
+	JNC OPEN_REG_OK
+
+	; Create file if missing
+	MOV AH, 3CH
+	MOV CX, 0
+	LEA DX, fileName
+	INT 21H
+	JC  REG_FILE_ERROR
+
+OPEN_REG_OK:
+	MOV fileHandle, AX
+
+	; 5. Seek to End of File (AL = 2, CX:DX = 0)
+	MOV AH, 42H
+	MOV AL, 2
+	MOV BX, fileHandle
+	XOR CX, CX
+	XOR DX, DX
+	INT 21H
+	JC  REG_FILE_ERROR
+
+	; 6. Append 13 bytes
+	MOV AH, 40H
+	MOV BX, fileHandle
+	MOV CX, 13
+	LEA DX, RegRecord
+	INT 21H
+	JC  REG_FILE_ERROR
+
+	; 7. Close file handle
+	MOV AH, 3EH
+	MOV BX, fileHandle
+	INT 21H
+
+	MOV AH, 09H
+	LEA DX, msgRegSuccess
+	INT 21H
+	JMP REG_DONE
+
+REG_FILE_ERROR:
+	MOV AH, 3EH
+	MOV BX, fileHandle
+	INT 21H
+
+	MOV AH, 09H
+	LEA DX, msgRegFail
+	INT 21H
+
+REG_DONE:
+	CALL WAIT_KEY
+	RET
+REGISTER_MEMBER ENDP
+
+; ==========================================================
 ; 1. Borrow Book
 ; ==========================================================
 Borrow_Book PROC
@@ -442,8 +532,11 @@ CONTINUE_BORROW:
 	INT 21H
 	
 	; === Valid Check ===
-	CMP BL, '0'             ; 使用 BL 验证
-	JE Exit_BORROW_BOOK
+	CMP BL, '0'
+	JNE CHECK_BORROW_RANGE
+	JMP Exit_BORROW_BOOK
+
+CHECK_BORROW_RANGE:
 	CMP BL, '1'
 	JB  INVALID_DAYS
 	CMP BL, '9'
