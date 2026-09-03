@@ -101,6 +101,7 @@
 	;Return Book Prompt
 	msgBorrowedListTitle DB 13,10,'--- YOUR CURRENT BORROWED BOOKS ---',13,10,'$'
 	msgNoBorrowedBooks   DB 13,10,'You currently have no borrowed books.',13,10,'$'
+	msgAlreadyBorrowed   DB 13,10,'[!] You have already borrowed this book!$'
 	msgBorrowPrefix      DB '-> Book ID: $'
 	msgDatePrefix        DB ' | Date Borrowed: $'
 	HasBorrowedBooks     DB 0
@@ -842,11 +843,14 @@ READ_BOOKS_OK:
 	
 	POP CX                     ; CX = Bytes read
 	CMP CX, 0
-	JE  BOOK_NOT_FOUND
-	
+	JNZ PROCEED_PRINT_BOOKS    ; [Fix] Trampoline jump to skip the error
+	JMP BOOK_NOT_FOUND
+
+PROCEED_PRINT_BOOKS:
 	LEA SI, bookBuffer
 
 	; Print all 10 books directly to screen
+	
 PRINT_BOOKS_LOOP:
 	MOV DL, [SI]
 	MOV AH, 02H
@@ -861,11 +865,18 @@ PRINT_BOOKS_LOOP:
 	LEA DX, msgPromtBookID
 	INT 21H
 	
+	; Flush keyboard buffer first to prevent accidental skips
+	MOV AH, 0CH
+	MOV AL, 0
+	INT 21H
+
 	LEA SI, BookID_INPUT
 	MOV CX, 5
 READ_BK_ID:
 	MOV AH, 01H
 	INT 21H
+	CMP AL, 13                  ; Ignore early Enter key
+	JE  READ_BK_ID
 	MOV [SI], AL
 	INC SI
 	LOOP READ_BK_ID
@@ -874,11 +885,97 @@ READ_BK_ID:
 	LEA DX, NL
 	INT 21H
 
+	; ==================================================
+	; 2.5 Check if User Already Borrowed This Book
+	; ==================================================
+	MOV AH, 3DH
+	MOV AL, 0                   ; Open Read-Only
+	LEA DX, BorrowFILE
+	INT 21H
+	JC  PROCEED_TO_CATALOG      ; If file doesn't exist, safe to borrow
+
+	MOV fileHandle, AX
+	
+	MOV AH, 3FH
+	MOV BX, fileHandle
+	MOV CX, 1000
+	LEA DX, buffer              ; Read file into buffer
+	INT 21H
+	PUSH AX                     ; Save bytes read
+	
+	MOV AH, 3EH
+	MOV BX, fileHandle
+	INT 21H
+	POP CX                      ; CX = Total bytes read
+
+	CMP CX, 0
+	JE  PROCEED_TO_CATALOG      ; If file is empty, safe to borrow
+
+	LEA SI, buffer
+
+SCAN_CHK_BORROW:
+	CMP CX, 11                  ; A valid record needs at least 11 chars (e.g., M0001,B0001)
+	JB  PROCEED_TO_CATALOG      ; If fewer than 11 bytes remain, stop scanning
+
+	; Check Member ID First
+	LEA DI, MemberID_INPUT
+	PUSH CX
+	PUSH SI
+	MOV CX, 5
+COMP_CHK_MID:
+	MOV AL, [SI]
+	CMP AL, [DI]
+	JNE CHK_REC_MISMATCH        ; If Member ID doesn't match, skip to next line
+	INC SI
+	INC DI
+	LOOP COMP_CHK_MID
+
+	; Member ID matched! Now check if Book ID matches
+	INC SI                      ; Skip ','
+	
+	LEA DI, BookID_INPUT
+	MOV CX, 5
+COMP_CHK_BID:
+	MOV AL, [SI]
+	CMP AL, [DI]
+	JNE CHK_REC_MISMATCH        ; If Book ID doesn't match, skip to next line
+	INC SI
+	INC DI
+	LOOP COMP_CHK_BID
+
+	; BOTH Member ID and Book ID matched! (User already has this book)
+	POP SI
+	POP CX
+	JMP ALREADY_BORROWED_ERR
+
+CHK_REC_MISMATCH:
+	POP SI                      ; Reset pointer to start of this line
+	POP CX                      ; Reset byte count
+
+SKIP_CHK_LINE:
+	CMP CX, 0
+	JE  PROCEED_TO_CATALOG      ; Stop if we reached end of file
+	MOV AL, [SI]
+	INC SI                      ; Move to next character
+	DEC CX                      ; Reduce remaining byte count
+	CMP AL, 10                  ; Is it a Line Feed (Newline)?
+	JNE SKIP_CHK_LINE           ; If not, keep scanning this line
+	JMP SCAN_CHK_BORROW         ; Once newline is found, check the next record
+
+ALREADY_BORROWED_ERR:
+	MOV AH, 09H
+	LEA DX, msgAlreadyBorrowed
+	INT 21H
+	JMP BORROW_EXIT             ; Block transaction and exit to menu
+
+PROCEED_TO_CATALOG:
+	; ==================================================
+
 	; --------------------------------------------------
 	; 3. Scan bookBuffer for Book ID (10 Records)
 	; --------------------------------------------------
 	LEA SI, bookBuffer
-	MOV CX, 10                 ; Search 10 records only
+	MOV CX, 10                 ; Search 10 records only                ; Search 10 records only
 
 SCAN_BOOK_EXIST:
 	LEA DI, BookID_INPUT
@@ -904,11 +1001,8 @@ BK_MISMATCH:
 	ADD SI, 32                 ; Advance to next 32-byte row
 	LOOP SCAN_BOOK_EXIST
 
-BOOK_NOT_FOUND:
-	MOV AH, 09H
-	LEA DX, msgErrBookNotFound
-	INT 21H
-	JMP BORROW_EXIT
+	; [Fix] If the loop finishes 10 times and doesn't find the book, it MUST go to the error!
+	JMP BOOK_NOT_FOUND         
 
 ; --------------------------------------------------
 ; 4. Quantity Check & Decrement
@@ -1070,6 +1164,12 @@ OPEN_BORROW_OK:
 	LEA DX, msgBorrowSuccess
 	INT 21H
 
+BOOK_NOT_FOUND:
+	MOV AH, 09H
+	LEA DX, msgErrBookNotFound
+	INT 21H
+	; Falls through directly to BORROW_EXIT
+
 BORROW_EXIT:
 	CALL WAIT_KEY
 	RET
@@ -1206,7 +1306,7 @@ EXP_DONE:
 CHECK_EXPIRY_STATUS ENDP
 
 ; ==========================================================
-; 2. RETURN BOOK (Cleaned: Resilient Parser & No Duplications)
+; 2. RETURN BOOK (Protected Stack, Safe Buffer, No 乱码)
 ; ==========================================================
 RETURN_BOOK PROC
 	CALL CLEAR_SCREEN
@@ -1221,7 +1321,6 @@ RETURN_BOOK PROC
 	LEA DX, msgBorrowedListTitle
 	INT 21H
 
-	; Open borrowed.txt (Read-Only)
 	MOV AH, 3DH
 	MOV AL, 0
 	LEA DX, BorrowFILE
@@ -1236,7 +1335,7 @@ OPEN_BORROW_LIST_OK:
 	MOV CX, 1000
 	LEA DX, buffer
 	INT 21H
-	PUSH AX                    ; Total bytes read
+	PUSH AX
 	
 	MOV AH, 3EH
 	MOV BX, fileHandle
@@ -1251,24 +1350,27 @@ START_LIST_SCAN:
 	LEA SI, buffer
 
 SCAN_USER_BORROWS:
-	CMP CX, 0
-	JNE PROCEED_BORROW_SCAN    ; Short jump forward if bytes remain
-	JMP CHECK_BORROW_COUNT     ; Unconditional far jump (no 128-byte limit)
+	CMP CX, 5
+	JAE PROCEED_BORROW_SCAN
+	JMP CHECK_BORROW_COUNT
 
 PROCEED_BORROW_SCAN:
-	; Skip empty/blank lines, spaces, CR, LF
+	; Skip whitespace
 	CMP BYTE PTR [SI], ' '
-	JE  SKIP_NEXT_CHAR
+	JE  SKIP_LIST_CHAR
 	CMP BYTE PTR [SI], 13
-	JE  SKIP_NEXT_CHAR
+	JE  SKIP_LIST_CHAR
 	CMP BYTE PTR [SI], 10
-	JE  SKIP_NEXT_CHAR
+	JE  SKIP_LIST_CHAR
+	JMP COMPARE_LIST_ENTRY
 
-	; Must have at least 5 bytes for MemberID
-	CMP CX, 5
-	JB  CHECK_BORROW_COUNT
+SKIP_LIST_CHAR:
+	INC SI
+	DEC CX
+	JNZ SCAN_USER_BORROWS
+	JMP CHECK_BORROW_COUNT
 
-	; Compare MemberID (5 bytes)
+COMPARE_LIST_ENTRY:
 	LEA DI, MemberID_INPUT
 	PUSH CX
 	PUSH SI
@@ -1283,47 +1385,60 @@ COMPARE_USER_LIST:
 
 	; Member ID Matched!
 	MOV HasBorrowedBooks, 1
-	INC SI                     ; Skip ','
+	INC SI                      ; Skip ','
 
 	; Display "-> Book ID: "
 	MOV AH, 09H
 	LEA DX, msgBorrowPrefix
 	INT 21H
 
-	; Print Book ID until next comma
-PRINT_BK_ID_LOOP:
+	; Print strict 5 chars for BookID
+	MOV CX, 5
+PRINT_5_CHAR_BK:
 	MOV DL, [SI]
-	CMP DL, ','
-	JE  DONE_PRINT_BK
 	MOV AH, 02H
 	INT 21H
 	INC SI
-	JMP PRINT_BK_ID_LOOP
+	LOOP PRINT_5_CHAR_BK
 
-DONE_PRINT_BK:
-	; Print " | Date Borrowed: "
+	INC SI                      ; Skip ','
+
 	MOV AH, 09H
 	LEA DX, msgDatePrefix
 	INT 21H
-	INC SI                     ; Skip ','
 
-	; Print Day and Month string until line break (CR/LF)
-PRINT_DATE_LOOP:
+	; Print strict 2 chars for Day
 	MOV DL, [SI]
-	CMP DL, 13
-	JE  DONE_PRINT_DATE
-	CMP DL, 10
-	JE  DONE_PRINT_DATE
 	MOV AH, 02H
 	INT 21H
 	INC SI
-	JMP PRINT_DATE_LOOP
+	MOV DL, [SI]
+	MOV AH, 02H
+	INT 21H
+	INC SI
 
-DONE_PRINT_DATE:
+	INC SI                      ; Skip ','
+	
+	; Print '/' Separator
+	MOV DL, '/'
+	MOV AH, 02H
+	INT 21H
+
+	; Print strict 2 chars for Month
+	MOV DL, [SI]
+	MOV AH, 02H
+	INT 21H
+	INC SI
+	MOV DL, [SI]
+	MOV AH, 02H
+	INT 21H
+	INC SI
+
 	MOV AH, 09H
 	LEA DX, NL
 	INT 21H
 
+	; Restore pointers to the exact start of the line to sync CX safely
 	POP SI
 	POP CX
 	JMP SKIP_TO_NEXT_LINE
@@ -1337,15 +1452,9 @@ SKIP_TO_NEXT_LINE:
 	INC SI
 	DEC CX
 	JZ  CHECK_BORROW_COUNT
-	CMP AL, 10                 ; LF
+	CMP AL, 10                  ; Move forward until newline LF
 	JNE SKIP_TO_NEXT_LINE
 	JMP SCAN_USER_BORROWS
-
-SKIP_NEXT_CHAR:
-	INC SI
-	DEC CX
-	JZ  CHECK_BORROW_COUNT   ; If CX reaches 0, stop scanning
-	JMP SCAN_USER_BORROWS    ; Unconditional far jump (no 128-byte limit)
 
 CHECK_BORROW_COUNT:
 	CMP HasBorrowedBooks, 1
@@ -1365,11 +1474,17 @@ PROMPT_RETURN_INPUT:
 	LEA DX, msgPromtBookID
 	INT 21H
 	
+	MOV AH, 0CH
+	MOV AL, 0
+	INT 21H
+
 	LEA SI, BookID_INPUT
 	MOV CX, 5
 READ_RET_BK:
 	MOV AH, 01H
 	INT 21H
+	CMP AL, 13                  ; Ignore accidental Enter
+	JE  READ_RET_BK
 	MOV [SI], AL
 	INC SI
 	LOOP READ_RET_BK
@@ -1382,7 +1497,7 @@ READ_RET_BK:
 	; Step 3: Open borrowed.txt & Locate Transaction
 	; --------------------------------------------------
 	MOV AH, 3DH
-	MOV AL, 2                  ; Read/Write
+	MOV AL, 2
 	LEA DX, BorrowFILE
 	INT 21H
 	JNC OPEN_RET_OK
@@ -1396,31 +1511,41 @@ OPEN_RET_OK:
 	LEA DX, buffer
 	INT 21H
 	
-	MOV borrowFileSize, AX     ; <--- Save the EXACT file size read!
+	MOV borrowFileSize, AX
 	MOV CX, AX
+	
+	MOV AH, 3EH
+	MOV BX, fileHandle
+	INT 21H
 	
 	CMP CX, 0
 	JNE SCAN_BORROW_START
-	JMP CLOSE_RET_NOT_FOUND
+	JMP NOT_BORROWED_ERR
 
 SCAN_BORROW_START:
 	LEA SI, buffer
 
 FIND_BORROW_RECORD:
 	CMP CX, 5
-	JAE PROCEED_FIND_REC       ; Jump forward (within range) if CX >= 5
-	JMP CLOSE_RET_NOT_FOUND    ; Unconditional far jump (no 128-byte limit)
+	JAE PROCEED_FIND_REC
+	JMP NOT_BORROWED_ERR
 
 PROCEED_FIND_REC:
-	; Skip blank lines
 	CMP BYTE PTR [SI], ' '
-	JE  SKIP_RET_LINE
+	JE  SKIP_RET_STRAY
 	CMP BYTE PTR [SI], 13
-	JE  SKIP_RET_LINE
+	JE  SKIP_RET_STRAY
 	CMP BYTE PTR [SI], 10
-	JE  SKIP_RET_LINE
-	
-	; Match MemberID (5 bytes)
+	JE  SKIP_RET_STRAY
+	JMP MATCH_BORROW_FIELDS
+
+SKIP_RET_STRAY:
+	INC SI
+	DEC CX
+	JNZ FIND_BORROW_RECORD
+	JMP NOT_BORROWED_ERR
+
+MATCH_BORROW_FIELDS:
 	LEA DI, MemberID_INPUT
 	PUSH CX
 	PUSH SI
@@ -1433,9 +1558,8 @@ COMP_RET_MID:
 	INC DI
 	LOOP COMP_RET_MID
 	
-	INC SI                     ; Skip ','
+	INC SI                      ; Skip ','
 	
-	; Match BookID (5 bytes)
 	LEA DI, BookID_INPUT
 	MOV CX, 5
 COMP_RET_BID:
@@ -1446,49 +1570,34 @@ COMP_RET_BID:
 	INC DI
 	LOOP COMP_RET_BID
 	
-	; Match Found!
-	INC SI                     ; Skip ','
+	INC SI                      ; Skip ','
 	
-	; Parse BorrowDay
-	XOR AX, AX
-READ_DAY_NUM:
-	MOV BL, [SI]
-	CMP BL, ','
-	JE  DONE_READ_DAY
-	SUB BL, '0'
-	MOV BH, AL
-	MOV AL, 10
-	MUL BH
-	ADD AL, BL
+	; Parse BorrowDay (2 digits)
+	MOV AL, [SI]
+	SUB AL, '0'
+	MOV BL, 10
+	MUL BL
 	INC SI
-	JMP READ_DAY_NUM
-
-DONE_READ_DAY:
+	ADD AL, [SI]
+	SUB AL, '0'
 	MOV BorrowDay, AL
-	INC SI                     ; Skip ','
-	
-	; Parse BorrowMonth
-	XOR AX, AX
-READ_MONTH_NUM:
-	MOV BL, [SI]
-	CMP BL, 13
-	JE  DONE_READ_MONTH
-	CMP BL, 10
-	JE  DONE_READ_MONTH
-	SUB BL, '0'
-	MOV BH, AL
-	MOV AL, 10
-	MUL BH
-	ADD AL, BL
 	INC SI
-	JMP READ_MONTH_NUM
-
-DONE_READ_MONTH:
+	
+	INC SI                      ; Skip ','
+	
+	; Parse BorrowMonth (2 digits)
+	MOV AL, [SI]
+	SUB AL, '0'
+	MOV BL, 10
+	MUL BL
+	INC SI
+	ADD AL, [SI]
+	SUB AL, '0'
 	MOV BorrowMonth, AL
 	
-	POP SI                     ; SI = Start of matched record
-	POP CX
-	JMP CALCULATE_FINE_SECTION
+	POP SI                      ; SI = Start of matched record
+	POP CX                      ; CX = Remaining bytes from record start
+	JMP CHECK_LATE_FINE_FIRST
 
 RET_REC_MISMATCH:
 	POP SI
@@ -1498,73 +1607,160 @@ SKIP_RET_LINE:
 	MOV AL, [SI]
 	INC SI
 	DEC CX
-	JZ  CLOSE_RET_NOT_FOUND
-	CMP AL, 10                 ; Move to next line
+	JNZ CONT_SKIP_RET_LINE
+	JMP NOT_BORROWED_ERR
+
+CONT_SKIP_RET_LINE:
+	CMP AL, 10
 	JNE SKIP_RET_LINE
 	JMP FIND_BORROW_RECORD
 
-CLOSE_RET_NOT_FOUND:
-	MOV AH, 3EH
-	MOV BX, fileHandle
-	INT 21H
-	JMP NOT_BORROWED_ERR
-
-; --------------------------------------------------
-	; Step 4: Delete Borrowed Record
 	; --------------------------------------------------
-CALCULATE_FINE_SECTION:
-	; SI points to start of matched record (to delete)
-	; CX has remaining bytes from start of matched record to EOF
+	; Step 4: Calculate Late Fine & CHECK BALANCE FIRST
+	; --------------------------------------------------
+CHECK_LATE_FINE_FIRST:
+	; PROTECT REGISTERS!
+	; INT 21H AH=2AH overwrites CX with the Year. 
+	; PRINT_NUM overwrites CX with digits.
+	; We MUST safely lock away CX (file bytes) and SI (buffer pointer).
+	PUSH CX
+	PUSH SI
+
+	MOV AH, 2AH
+	INT 21H
+
+	; Month difference with year wrap support
+	MOV AL, DH
+	CMP AL, BorrowMonth
+	JAE NO_YEAR_WRAP_RET
+	ADD AL, 12
+NO_YEAR_WRAP_RET:
+	SUB AL, BorrowMonth
+	MOV BL, 30
+	MUL BL
+	MOV CH, AL
+
+	; Day difference: Add CH first to avoid negative underflow
+	MOV AL, DL
+	ADD AL, CH
+	SUB AL, BorrowDay
+	MOV DaysElapsed, AL
+
+	; Max allowance based on tier
+	MOV MaxAllowedDays, 7       ; Bronze
+	CMP MemberTier, 'B'
+	JE  CHECK_FINE_CALC
+
+	CMP MemberTier, 'S'
+	JNE CHK_GOLD_ALLOW_RET
+	MOV MaxAllowedDays, 14      ; Silver
+	JMP CHECK_FINE_CALC
+
+CHK_GOLD_ALLOW_RET:
+	CMP MemberTier, 'G'
+	JNE CHECK_FINE_CALC
+	MOV MaxAllowedDays, 30      ; Gold
+
+CHECK_FINE_CALC:
+	MOV AL, DaysElapsed
+	CMP AL, MaxAllowedDays
+	JBE ALLOW_RETURN_NO_FINE    ; Not overdue
+
+	; Fine = (DaysElapsed - Allowance) * RM 3
+	SUB AL, MaxAllowedDays
+	MOV OverdueDays, AL
+	MOV CL, 3
+	MUL CL
+	MOV BL, AL                  ; BL = Fine Amount
+
+	; Balance validation
+	CMP MemberBalance, BL
+	JAE BAL_IS_ENOUGH
+
+	; If not enough balance: Restore stack and exit
+	POP SI
+	POP CX
+	JMP RET_FINE_UNPAID
+
+BAL_IS_ENOUGH:
+	; Deduct fine & update memory variables
+	SUB MemberBalance, BL
+	ADD TotalFine, BL
+	ADD TotalRevenue, BL
+
+	MOV AH, 09H
+	LEA DX, msgFinePaid
+	INT 21H
+	MOV AL, BL
+	CALL PRINT_NUM
+	CALL PRINT_BALANCE
+	JMP READY_TO_DELETE
+
+ALLOW_RETURN_NO_FINE:
+	MOV AH, 09H
+	LEA DX, msgReturnSuccess
+	INT 21H
+
+READY_TO_DELETE:
+	; RESTORE REGISTERS cleanly BEFORE executing file deletion
+	POP SI
+	POP CX
+
+	; --------------------------------------------------
+	; Step 5: Shift & Delete from borrowed.txt (19 Bytes)
+	; --------------------------------------------------
+EXECUTE_FILE_DELETION:
+	MOV DI, SI                  ; DI = Start of matched record
+	ADD SI, 19                  ; SI = Start of next record
 	
-	MOV DI, SI                  ; DI = Destination (start of deleted record)
-	ADD SI, 19                  ; SI = Source (start of next record after 19 bytes)
-	
-	; Calculate bytes to shift: CX = remaining bytes - 19
 	SUB CX, 19
 	CMP CX, 0
-	JLE DONE_SHIFTING           ; If last record in file was deleted, no shift needed
+	JLE DONE_SHIFTING_DATA
 
-SHIFT_BUFFER_LOOP:
+SHIFT_BUFFER_LOOP_RET:
 	MOV AL, [SI]
 	MOV [DI], AL
 	INC SI
 	INC DI
-	LOOP SHIFT_BUFFER_LOOP
+	LOOP SHIFT_BUFFER_LOOP_RET
 
-DONE_SHIFTING:
-	; Reduce total file size by 19 bytes
+DONE_SHIFTING_DATA:
 	SUB borrowFileSize, 19
 
-	; Re-create / truncate file to new smaller size
-	MOV AH, 3CH                 ; Create/Truncate borrowed.txt
+	MOV AH, 3CH                 ; Re-create/truncate borrowed.txt
 	MOV CX, 0
 	LEA DX, BorrowFILE
 	INT 21H
 	MOV fileHandle, AX
 
-	; Write back only the valid remaining data
 	CMP borrowFileSize, 0
-	JE  DONE_FILE_UPDATE        ; If file is now empty, skip writing
+	JE  CLOSE_BORROW_FILE
 
 	MOV AH, 40H
 	MOV BX, fileHandle
-	MOV CX, borrowFileSize      ; Write new clean size
+	MOV CX, borrowFileSize
 	LEA DX, buffer
 	INT 21H
 
-DONE_FILE_UPDATE:
+CLOSE_BORROW_FILE:
 	MOV AH, 3EH
 	MOV BX, fileHandle
 	INT 21H
 
 	; --------------------------------------------------
-	; Step 5: Replenish Book Stock in book.txt (+1)
+	; Step 6: Replenish Book Stock in book.txt (+1)
 	; --------------------------------------------------
 	MOV AH, 3DH
-	MOV AL, 2                  ; Read/Write
+	MOV AL, 2
 	LEA DX, BookFILE
 	INT 21H
-	JC  SKIP_STOCK_UPDATE
+	JNC OPEN_BOOK_INC_OK
+	
+	; Save user data even if book.txt fails to open
+	CALL SAVE_USER_DATA
+	JMP RET_EXIT
+
+OPEN_BOOK_INC_OK:
 	MOV fileHandle, AX
 
 	MOV AH, 3FH
@@ -1574,38 +1770,38 @@ DONE_FILE_UPDATE:
 	INT 21H
 
 	LEA SI, bookBuffer
-	MOV CX, 10                 ; 10 books
+	MOV CX, 10
 
-SCAN_BK_FOR_INC:
+SCAN_BK_FOR_INC_RET:
 	LEA DI, BookID_INPUT
 	PUSH CX
 	PUSH SI
 	MOV CX, 5
-COMP_BK_FOR_INC:
+COMP_BK_FOR_INC_RET:
 	MOV AL, [SI]
 	CMP AL, [DI]
-	JNE NEXT_BK_INC
+	JNE NEXT_BK_INC_RET
 	INC SI
 	INC DI
-	LOOP COMP_BK_FOR_INC
+	LOOP COMP_BK_FOR_INC_RET
 
-	; Increment Quantity at offset 27
+	; Increment stock digit at offset 27
 	POP SI
 	POP CX
 	LEA BX, [SI + 27]
 
 	CMP BYTE PTR [BX+2], '9'
-	JNE INC_SINGLE_DIGIT
+	JNE INC_SINGLE_DIGIT_RET
 	MOV BYTE PTR [BX+2], '0'
-	INC BYTE PTR [BX+1]        ; Carry (009 -> 010)
-	JMP WRITE_UPDATED_BOOK
+	INC BYTE PTR [BX+1]
+	JMP WRITE_UPDATED_BOOK_RET
 
-INC_SINGLE_DIGIT:
+INC_SINGLE_DIGIT_RET:
 	INC BYTE PTR [BX+2]
 
-WRITE_UPDATED_BOOK:
+WRITE_UPDATED_BOOK_RET:
 	MOV AH, 42H
-	MOV AL, 0                  ; Rewind
+	MOV AL, 0
 	MOV BX, fileHandle
 	XOR CX, CX
 	XOR DX, DX
@@ -1620,93 +1816,23 @@ WRITE_UPDATED_BOOK:
 	MOV AH, 3EH
 	MOV BX, fileHandle
 	INT 21H
-	JMP SKIP_STOCK_UPDATE
+	
+	; Now that buffer is freed, it is 100% safe to save account.txt!
+	CALL SAVE_USER_DATA         
+	JMP RET_EXIT
 
-NEXT_BK_INC:
+NEXT_BK_INC_RET:
 	POP SI
 	POP CX
 	ADD SI, 32
-	LOOP SCAN_BK_FOR_INC
+	LOOP SCAN_BK_FOR_INC_RET
 
 	MOV AH, 3EH
 	MOV BX, fileHandle
 	INT 21H
-
-SKIP_STOCK_UPDATE:
-	; --------------------------------------------------
-	; Step 6: Safe Date Arithmetic & Tier Late Check
-	; --------------------------------------------------
-	; Fetch current date (DH = Month, DL = Day)
-	MOV AH, 2AH
-	INT 21H
-
-	; Safe Month Difference Calculation (Handles Year Rollover)
-	MOV AL, DH                 ; AL = Current Month
-	CMP AL, BorrowMonth
-	JAE NO_YEAR_WRAP
-	ADD AL, 12                 ; Add 12 months if borrowing crossed into the new year
 	
-NO_YEAR_WRAP:
-	SUB AL, BorrowMonth        ; Now always positive (0 to 11)
-	MOV BL, 30
-	MUL BL                     ; AL = Months Difference * 30
-	MOV CH, AL                 ; Store days from months into CH
-
-	; Days Difference Calculation
-	MOV AL, DL                 ; AL = Current Day
-	SUB AL, BorrowDay
-	ADD AL, CH                 ; Total days elapsed = (DayDiff) + (MonthDiff * 30)
-	MOV DaysElapsed, AL
-
-	; Determine Tier Allowance
-	MOV MaxAllowedDays, 7      ; Bronze default
-	CMP MemberTier, 'B'
-	JE  COMPARE_OVERDUE
-
-	CMP MemberTier, 'S'
-	JNE CHK_GOLD_ALLOW
-	MOV MaxAllowedDays, 14
-	JMP COMPARE_OVERDUE
-
-CHK_GOLD_ALLOW:
-	CMP MemberTier, 'G'
-	JNE COMPARE_OVERDUE
-	MOV MaxAllowedDays, 30
-
-COMPARE_OVERDUE:
-	MOV AL, DaysElapsed
-	CMP AL, MaxAllowedDays
-	JBE RETURN_NO_FINE
-
-	; Overdue Days = DaysElapsed - MaxAllowedDays
-	SUB AL, MaxAllowedDays
-	MOV OverdueDays, AL
-	
-	; Fine = OverdueDays * RM 3
-	MOV CL, 3
-	MUL CL
-	MOV BL, AL                 ; BL = Fine amount
-	
-	CMP MemberBalance, BL
-	JB  RET_FINE_UNPAID
-	
-	SUB MemberBalance, BL
-	ADD TotalFine, BL
-	ADD TotalRevenue, BL
-	CALL SAVE_USER_DATA
-
-	MOV AH, 09H
-	LEA DX, msgFinePaid
-	INT 21H
-	MOV AL, BL
-	CALL PRINT_NUM
-	CALL PRINT_BALANCE
-	JMP RET_EXIT
-
-RETURN_NO_FINE:
-	MOV AH, 09H
-	LEA DX, msgReturnSuccess
-	INT 21H
+	; Now that buffer is freed, it is 100% safe to save account.txt!
+	CALL SAVE_USER_DATA         
 	JMP RET_EXIT
 
 RET_FINE_UNPAID:
