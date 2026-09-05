@@ -1166,7 +1166,9 @@ OPEN_BORROW_OK:
 	MOV AH, 09H
 	LEA DX, msgBorrowSuccess
 	INT 21H
-
+	
+	JMP BORROW_EXIT
+	
 BOOK_NOT_FOUND:
 	MOV AH, 09H
 	LEA DX, msgErrBookNotFound
