@@ -20,7 +20,7 @@
 		DB '2. Subscribe / Upgrade Membership',13,10
 		DB '3. Member Top-up (Wallet)',13,10
 		DB '4. Return Book / Late Fine',13,10
-		DB '5. Daily Summary Report',13,10
+		DB '5. Summary Report',13,10
 		DB '6. Logout',13,10
 		DB '0. Exit System',13,10
 		DB '=======================================',13,10
@@ -51,10 +51,10 @@
 	CurrentDay    DB ?
 	CurrentMonth  DB ?
 
-	msgRepTitle DB 13,10,13,10,13,10,'===== DAILY SUMMARY REPORT =====$'
+	msgRepTitle DB 13,10,13,10,13,10,'======== SUMMARY REPORT ========$'
 	msgRepBooks DB 13,10,'Total Books Borrowed : $'
 	msgRepFine  DB 13,10,'Total Fine (RM)      : $'
-	msgRepRev   DB 13,10,'Total Revenue (RM)   : $'
+	msgRepSpe   DB 13,10,'Total Spend(RM)      : $'
 	msgRepLine  DB 13,10,'================================$'
 	
 	;================================================= Prompts ========================================================
@@ -1931,7 +1931,6 @@ CONTINUE_TOPUP:
 
 	; === Update Data ===
 	MOV MemberBalance, AL
-	ADD TotalRevenue, CH
 	
 	CALL SAVE_USER_DATA
 
@@ -1983,7 +1982,7 @@ PRINT_REPORT PROC
 	
 	;Display Report Form (Revenue)
 	MOV AH, 09H
-	LEA DX, msgRepRev
+	LEA DX, msgRepSpe
 	INT 21H
 
 	;Display Report Detail (Revenue)
