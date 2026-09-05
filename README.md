@@ -10,11 +10,12 @@ For my function 1 ~ 3
 9. status change
 
 Some tools
-1. PRINT_NUM, can print 3 digits
-2. PRINT_BALANCE, print balance
-3. READ_USERNAME and READ_PASSWORD, can store 5 digits
-4. WAIT_KEY, change page when user press any key
-5. CLEAR_SCREEN, clean screen
+1. REGISTER_MEMBER, register program
+2. PRINT_NUM, can print 3 digits
+3. PRINT_BALANCE, print balance
+4. READ_USERNAME and READ_PASSWORD, can store 5 digits
+5. WAIT_KEY, change page when user press any key
+6. CLEAR_SCREEN, clean screen
 
 open windows cmd
 
@@ -35,6 +36,8 @@ git branch
 ;change branch
 
 git checkout
+
+git merge main
 
 =============== commit ===============
 
