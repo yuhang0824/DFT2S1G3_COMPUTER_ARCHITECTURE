@@ -26,6 +26,8 @@
 		DB '=======================================',13,10
 		DB 'Please enter your choice (0-6): $'
 
+	;==================================================================================================================
+
 	msgTierMenu DB 13,10
 		DB '====== SELECT MEMBERSHIP TIER ======',13,10
 		DB '1. Bronze - RM 50 (Max Borrow:  7 Days)',13,10
@@ -91,12 +93,12 @@
 	msgErrIDExists   DB 13,10,'Member ID already exists! Registration cancelled.$'
 	
 	;BOOK Prompts
-	msgPromtBookID    DB 13,10,'Enter Book ID (B0001): $'
+	msgPromtBookID     DB 13,10,'Enter Book ID (B0001): $'
 	msgErrBookNotFound DB 13,10,'[!] Book ID not found in library!$'
-	msgErrNotBorrowed DB 13,10,'[!] You have not borrowed this book!$'
-	msgAvailableBooks DB 13,10,'--- AVAILABLE BOOKS ---$'
-	msgDaysBorrowed   DB 13,10,'Total days borrowed: $'
-	msgOverdueDaysMsg DB 13,10,'Overdue days: $'
+	msgErrNotBorrowed  DB 13,10,'[!] You have not borrowed this book!$'
+	msgAvailableBooks  DB 13,10,'--- AVAILABLE BOOKS ---$'
+	msgDaysBorrowed    DB 13,10,'Total days borrowed: $'
+	msgOverdueDaysMsg  DB 13,10,'Overdue days: $'
 	
 	;Return Book Prompt
 	msgBorrowedListTitle DB 13,10,'--- YOUR CURRENT BORROWED BOOKS ---',13,10,'$'
@@ -116,6 +118,7 @@
 	msgOverflow   DB 13,10,'Exceeds maximum limit (RM 255)!$'
 	msgAlreadyActive DB 13,10,'[!] You already have an active membership! You can only re-subscribe once expired.$'
 	msgOutOfStock   DB 13,10,'[!] Book is out of stock (Qty: 000)!$'
+
 	;================================================= Buffers & File Variables =======================================
 
 	MemberID_INPUT DB 5 DUP(?)
@@ -126,19 +129,19 @@
 	; Standard buffer for account/borrowed records
 	buffer         DB 1024 DUP(?)
 	
-	AccFILE   DB 'account.txt', 0
-	logMsg         DB 'M0001,12345,050,N,00,00', 13, 10
-	msgLen         DW 24
-	fileHandle DW ?
+	AccFILE     DB 'account.txt', 0
+	logMsg      DB 'M0001,12345,050,N,00,00', 13, 10
+	msgLen      DW 24
+	fileHandle  DW ?
 	accFileSize DW 0
 	
-	BookFILE      DB 'book.txt', 0
-	BorrowFILE    DB 'borrowed.txt', 0
-	borrowFileSize  DW 0
+	BookFILE       DB 'book.txt', 0
+	BorrowFILE     DB 'borrowed.txt', 0
+	borrowFileSize DW 0
 	
 	defaultBooks DB 'B0001,Assembly Language   ,005', 13, 10
-             DB 'B0002,Data Structures     ,005', 13, 10
-             DB 'B0003,Operating Systems   ,005', 13, 10
+                 DB 'B0002,Data Structures     ,005', 13, 10
+                 DB 'B0003,Operating Systems   ,005', 13, 10
 	defaultBookLen DW 96
 	
 	BookID_INPUT   DB 5 DUP(?)
