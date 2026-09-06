@@ -123,21 +123,27 @@
 
 	MemberID_INPUT DB 5 DUP(?)
 	Password_INPUT DB 5 DUP(?)
+	
 	RegRecord      DB 25 DUP(?)
 	; Separate dedicated buffer for 20 books 
 	bookBuffer     DB 2048 DUP(?)
 	; Standard buffer for account/borrowed records
 	buffer         DB 1024 DUP(?)
 	
-	AccFILE     DB 'account.txt', 0
+	AccFILE     DB 'ACCOUNT.TXT', 0
 	logMsg      DB 'M0001,12345,050,N,00,00', 13, 10
 	msgLen      DW 24
 	fileHandle  DW ?
 	accFileSize DW 0
 	
-	BookFILE       DB 'book.txt', 0
-	BorrowFILE     DB 'borrowed.txt', 0
+	BookFILE       DB 'BOOK.TXT', 0
+	
+	BorrowFILE     DB 'BORROWED.TXT', 0
 	borrowFileSize DW 0
+	
+	RepFILE      DB 'REPORT.TXT', 0
+	repFileSize  DW 0
+	repInitRecord DB 19 DUP(?)
 	
 	defaultBooks DB 'B0001,Assembly Language   ,005', 13, 10
                  DB 'B0002,Data Structures     ,005', 13, 10
@@ -159,6 +165,9 @@
 	BORROW_STATUS DB 0 
 	RETURN_STATUS DB 0
 	TOPUP_STATUS  DB 0
+	
+	msgWriteFail DB 'msgWriteFail$'
+	TempFine DB 0
 	
 	NL DB 10,13,'$'
 	
@@ -720,7 +729,9 @@ COPY_REG_PASS:
 	MOV CX, 0
 	LEA DX, AccFILE
 	INT 21H
-	JC  REG_FILE_ERROR
+	JNC OPEN_REG_OK
+	JMP REG_FILE_ERROR
+	
 
 OPEN_REG_OK:
 	MOV fileHandle, AX
@@ -732,21 +743,104 @@ OPEN_REG_OK:
 	XOR CX, CX							;EXPLIAN!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1	
 	XOR DX, DX							;EXPLIAN!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
 	INT 21H
-	JC  REG_FILE_ERROR
+	JNC WRITE_REGISTER_RECORD
+	JMP REG_FILE_ERROR
 
+WRITE_REGISTER_RECORD:
 	; 6. Append 24-byte record (Single write)
 	MOV AH, 40H
 	MOV BX, fileHandle
 	MOV CX, 25
 	LEA DX, RegRecord
 	INT 21H
-	JC  REG_FILE_ERROR
-
+	JNC CLOSE_ACCOUNT_FILE
+	JMP REG_FILE_ERROR
+	
+CLOSE_ACCOUNT_FILE:
 	; 7. Close file handle
 	MOV AH, 3EH
 	MOV BX, fileHandle
 	INT 21H
 
+	; ==========================================================
+	; Initialize REPORT.TXT for the new member
+	; ==========================================================
+	LEA DI, repInitRecord
+	
+	; 1. 复制新注册的 Member ID (5 bytes)
+	LEA SI, MemberID_INPUT
+	MOV CX, 5
+COPY_REP_ID:
+	MOV AL, [SI]
+	MOV [DI], AL
+	INC SI
+	INC DI
+	LOOP COPY_REP_ID
+	
+	; 2. 写入 ",000,000,000" (12 bytes)
+	MOV BYTE PTR [DI], ','
+	INC DI
+	MOV CX, 3
+	MOV AL, '0'
+REP_Z1: MOV [DI], AL
+	INC DI
+	LOOP REP_Z1
+	
+	MOV BYTE PTR [DI], ','
+	INC DI
+	MOV CX, 3
+REP_Z2: MOV [DI], AL
+	INC DI
+	LOOP REP_Z2
+	
+	MOV BYTE PTR [DI], ','
+	INC DI
+	MOV CX, 3
+REP_Z3: MOV [DI], AL
+	INC DI
+	LOOP REP_Z3
+	
+	; 3. 添加 CRLF (2 bytes)
+	MOV BYTE PTR [DI], 13
+	INC DI
+	MOV BYTE PTR [DI], 10
+	
+	; 4. 追加写入到 REPORT.TXT 末尾
+	MOV AH, 3DH
+	MOV AL, 2
+	LEA DX, RepFILE
+	INT 21H
+	JNC OPEN_REP_OK
+	
+	; 如果文件不存在，创建它
+	MOV AH, 3CH
+	MOV CX, 0
+	LEA DX, RepFILE
+	INT 21H
+OPEN_REP_OK:
+	MOV fileHandle, AX
+	
+	; 移到文件末尾 (EOF)
+	MOV AH, 42H
+	MOV AL, 2
+	MOV BX, fileHandle
+	XOR CX, CX
+	XOR DX, DX
+	INT 21H
+	
+	; 写入 19 bytes
+	MOV AH, 40H
+	MOV BX, fileHandle
+	MOV CX, 19
+	LEA DX, repInitRecord
+	INT 21H
+	
+	; 关闭文件
+	MOV AH, 3EH
+	MOV BX, fileHandle
+	INT 21H
+	; ==========================================================
+	
 	MOV AH, 09H
 	LEA DX, msgRegSuccess
 	INT 21H
@@ -895,8 +989,9 @@ READ_BK_ID:
 	MOV AL, 0                   ; Open Read-Only
 	LEA DX, BorrowFILE
 	INT 21H
-	JC  PROCEED_TO_CATALOG      ; If file doesn't exist, safe to borrow
-
+	JNC OPEN_BORROW_CHK_OK
+	JMP PROCEED_TO_CATALOG      ; <--- Bridge Jump
+OPEN_BORROW_CHK_OK:
 	MOV fileHandle, AX
 	
 	MOV AH, 3FH
@@ -912,27 +1007,33 @@ READ_BK_ID:
 	POP CX                      ; CX = Total bytes read
 
 	CMP CX, 0
-	JE  PROCEED_TO_CATALOG      ; If file is empty, safe to borrow
-
-	LEA SI, buffer
+	JNE SCAN_CHK_BORROW
+	JMP PROCEED_TO_CATALOG      ; <--- Bridge Jump
 
 SCAN_CHK_BORROW:
-	CMP CX, 11                  ; A valid record needs at least 11 chars (e.g., M0001,B0001)
-	JB  PROCEED_TO_CATALOG      ; If fewer than 11 bytes remain, stop scanning
+	CMP CX, 11                  
+	JAE COMP_CHK_MID
+	JMP PROCEED_TO_CATALOG      ; <--- Bridge Jump
 
+COMP_CHK_MID:
 	; Check Member ID First
 	LEA DI, MemberID_INPUT
 	PUSH CX
 	PUSH SI
 	MOV CX, 5
-COMP_CHK_MID:
+COMP_CHK_MID_LOOP:
 	MOV AL, [SI]
 	CMP AL, [DI]
-	JNE CHK_REC_MISMATCH        ; If Member ID doesn't match, skip to next line
+	JNE CHK_REC_MISMATCH_BRIDGE ; <--- 使用跳板
 	INC SI
 	INC DI
-	LOOP COMP_CHK_MID
+	LOOP COMP_CHK_MID_LOOP
+	JMP CHECK_BOOK_ID_START
 
+CHK_REC_MISMATCH_BRIDGE:
+	JMP CHK_REC_MISMATCH
+
+CHECK_BOOK_ID_START:
 	; Member ID matched! Now check if Book ID matches
 	INC SI                      ; Skip ','
 	
@@ -941,35 +1042,39 @@ COMP_CHK_MID:
 COMP_CHK_BID:
 	MOV AL, [SI]
 	CMP AL, [DI]
-	JNE CHK_REC_MISMATCH        ; If Book ID doesn't match, skip to next line
+	JNE CHK_REC_MISMATCH_BRIDGE2 ; <--- 使用跳板
 	INC SI
 	INC DI
 	LOOP COMP_CHK_BID
+	JMP ALREADY_BORROWED_ERR_BRIDGE
 
-	; BOTH Member ID and Book ID matched! (User already has this book)
-	POP SI
-	POP CX
+CHK_REC_MISMATCH_BRIDGE2:
+	JMP CHK_REC_MISMATCH
+
+ALREADY_BORROWED_ERR_BRIDGE:
 	JMP ALREADY_BORROWED_ERR
 
 CHK_REC_MISMATCH:
-	POP SI                      ; Reset pointer to start of this line
-	POP CX                      ; Reset byte count
+	POP SI                      
+	POP CX                      
 
 SKIP_CHK_LINE:
 	CMP CX, 0
-	JE  PROCEED_TO_CATALOG      ; Stop if we reached end of file
+	JNE CONT_SKIP_CHK
+	JMP PROCEED_TO_CATALOG      ; <--- Bridge Jump
+CONT_SKIP_CHK:
 	MOV AL, [SI]
-	INC SI                      ; Move to next character
-	DEC CX                      ; Reduce remaining byte count
-	CMP AL, 10                  ; Is it a Line Feed (Newline)?
-	JNE SKIP_CHK_LINE           ; If not, keep scanning this line
-	JMP SCAN_CHK_BORROW         ; Once newline is found, check the next record
+	INC SI                      
+	DEC CX                      
+	CMP AL, 10                  
+	JNE SKIP_CHK_LINE           
+	JMP SCAN_CHK_BORROW         
 
 ALREADY_BORROWED_ERR:
 	MOV AH, 09H
 	LEA DX, msgAlreadyBorrowed
 	INT 21H
-	JMP BORROW_EXIT             ; Block transaction and exit to menu
+	JMP BORROW_EXIT             
 
 PROCEED_TO_CATALOG:
 	; ==================================================
@@ -978,7 +1083,7 @@ PROCEED_TO_CATALOG:
 	; 3. Scan bookBuffer for Book ID (10 Records)
 	; --------------------------------------------------
 	LEA SI, bookBuffer
-	MOV CX, 10                 ; Search 10 records only                ; Search 10 records only
+	MOV CX, 10                 ; Search 10 records only
 
 SCAN_BOOK_EXIST:
 	LEA DI, BookID_INPUT
@@ -1162,7 +1267,8 @@ OPEN_BORROW_OK:
 	MOV BX, fileHandle
 	INT 21H
 	
-	INC TotalBooks
+	MOV AL, 1
+	CALL UPDATE_REPORT_BOOKS
 	MOV AH, 09H
 	LEA DX, msgBorrowSuccess
 	INT 21H
@@ -1177,8 +1283,10 @@ BOOK_NOT_FOUND:
 
 BORROW_EXIT:
 	CALL WAIT_KEY
+	
 	RET
 BORROW_BOOK ENDP
+
 ; ==========================================================
 ; 2. SUBSCRIBE / UPGRADE MEMBERSHIP TIER (30-Day Expiry)
 ; ==========================================================
@@ -1223,7 +1331,8 @@ SUB_BRONZE:
 	CMP MemberBalance, 50
 	JB  SUB_NO_MONEY
 	SUB MemberBalance, 50
-	ADD TotalRevenue, 50
+	MOV AL, 50                 ; <--- 添加：将花费金额放入 AL
+	CALL UPDATE_REPORT_SPEND   ; <--- 添加：呼叫更新报告功能
 	MOV MemberTier, 'B'
 	JMP SET_EXPIRY_DATE
 
@@ -1231,7 +1340,8 @@ SUB_SILVER:
 	CMP MemberBalance, 75
 	JB  SUB_NO_MONEY
 	SUB MemberBalance, 75
-	ADD TotalRevenue, 75
+	MOV AL, 75                 ; <--- 添加：将花费金额放入 AL
+	CALL UPDATE_REPORT_SPEND   ; <--- 添加：呼叫更新报告功能
 	MOV MemberTier, 'S'
 	JMP SET_EXPIRY_DATE
 
@@ -1239,7 +1349,8 @@ SUB_GOLD:
 	CMP MemberBalance, 100
 	JB  SUB_NO_MONEY
 	SUB MemberBalance, 100
-	ADD TotalRevenue, 100
+	MOV AL, 100                ; <--- 添加：将花费金额放入 AL
+	CALL UPDATE_REPORT_SPEND   ; <--- 添加：呼叫更新报告功能
 	MOV MemberTier, 'G'
 	JMP SET_EXPIRY_DATE
 
@@ -1273,6 +1384,402 @@ MONTH_OK:
 	CALL WAIT_KEY
 	RET
 SUBSCRIBE_TIER ENDP
+
+; ==========================================================
+; Update User's Total Spend in REPORT.TXT
+; Input: AL = Amount spent (RM)
+; ==========================================================
+UPDATE_REPORT_SPEND PROC
+	PUSH AX                    
+	MOV AH, 3DH
+	MOV AL, 2
+	LEA DX, RepFILE
+	INT 21H
+	JNC URS_OPEN_OK
+	JMP URS_ERR                ; <--- Bridge Jump
+URS_OPEN_OK:
+	MOV fileHandle, AX
+
+	MOV AH, 3FH
+	MOV BX, fileHandle
+	MOV CX, 1000
+	LEA DX, buffer
+	INT 21H
+	MOV repFileSize, AX
+	PUSH AX
+	POP CX
+	
+	CMP CX, 0
+	JNE URS_FIND
+	JMP URS_CLOSE              ; <--- Bridge Jump
+
+URS_FIND:
+	LEA SI, buffer
+
+
+URS_FIND_LOOP:
+    CMP CX, 5
+    JAE URS_COMP_START
+    JMP URS_CLOSE             ; <--- Bridge Jump
+
+URS_COMP_START:
+	LEA DI, MemberID_INPUT
+	PUSH CX
+	PUSH SI
+	MOV CX, 5
+URS_COMP:
+	MOV DL, [SI]
+	CMP DL, [DI]
+	JNE URS_NEXT
+	INC SI
+	INC DI
+	LOOP URS_COMP
+	
+	POP SI
+	POP CX
+	JMP URS_UPDATE
+
+URS_NEXT:
+	POP SI
+	POP CX
+URS_SKIP_LINE:
+	MOV DL, [SI]
+	INC SI
+	DEC CX
+	JNZ URS_CHK_NL
+	JMP URS_CLOSE              ; <--- Bridge Jump
+URS_CHK_NL:
+	CMP DL, 10                 
+	JNE URS_SKIP_LINE
+	JMP URS_FIND_LOOP
+
+URS_UPDATE:
+	ADD SI, 14
+	
+	MOV AL, [SI]
+	SUB AL, '0'
+	MOV AH, 0
+	MOV CX, 100
+	MUL CX                     
+	MOV BX, AX                 
+
+	MOV AL, [SI+1]
+	SUB AL, '0'
+	MOV AH, 0
+	MOV CX, 10
+	MUL CX                     
+	ADD BX, AX
+
+	MOV AL, [SI+2]
+	SUB AL, '0'
+	MOV AH, 0
+	ADD BX, AX                 
+
+	POP AX                     
+	PUSH AX                    
+	MOV AH, 0
+	ADD AX, BX                 
+
+	MOV CX, 100
+	MOV DX, 0
+	DIV CX                     
+	ADD AL, '0'
+	MOV [SI], AL               
+
+	MOV AX, DX                 
+	MOV CL, 10
+	DIV CL                     
+	ADD AL, '0'
+	MOV [SI+1], AL             
+	ADD AH, '0'
+	MOV [SI+2], AH             
+
+	MOV AH, 42H
+	MOV AL, 0                  
+	MOV BX, fileHandle
+	XOR CX, CX
+	XOR DX, DX
+	INT 21H
+
+	MOV AH, 40H
+	MOV BX, fileHandle
+	MOV CX, repFileSize
+	LEA DX, buffer
+	INT 21H
+	
+	CMP AX, CX
+	JE  URS_WRITE_OK
+	MOV AH, 09H
+	LEA DX, msgWriteFail
+	INT 21H
+	JMP URS_CLOSE
+	
+	URS_WRITE_OK:
+		
+URS_CLOSE:
+	MOV AH, 3EH
+	MOV BX, fileHandle
+	INT 21H
+URS_ERR:
+	POP AX
+	RET
+UPDATE_REPORT_SPEND ENDP
+
+; ==========================================================
+; Update User's Borrowed Books in REPORT.TXT
+; ==========================================================
+UPDATE_REPORT_BOOKS PROC
+	PUSH AX
+	MOV AH, 3DH
+	MOV AL, 2
+	LEA DX, RepFILE
+	INT 21H
+	JNC URB_OPEN_OK
+	JMP URB_ERR
+URB_OPEN_OK:
+	MOV fileHandle, AX
+
+	MOV AH, 3FH
+	MOV BX, fileHandle
+	MOV CX, 1000
+	LEA DX, buffer
+	INT 21H
+	MOV repFileSize, AX
+	PUSH AX
+	POP CX
+	
+	CMP CX, 0
+	JNE URB_FIND
+	JMP URB_CLOSE
+
+URB_FIND:
+	LEA SI, buffer
+URB_FIND_LOOP:
+	CMP CX, 5
+	JAE URB_COMP_START
+	JMP URB_CLOSE
+
+URB_COMP_START:
+	LEA DI, MemberID_INPUT
+	PUSH CX
+	PUSH SI
+	MOV CX, 5
+URB_COMP:
+	MOV DL, [SI]
+	CMP DL, [DI]
+	JNE URB_NEXT
+	INC SI
+	INC DI
+	LOOP URB_COMP
+	
+	POP SI
+	POP CX
+	JMP URB_UPDATE
+
+URB_NEXT:
+	POP SI
+	POP CX
+URB_SKIP_LINE:
+	MOV DL, [SI]
+	INC SI
+	DEC CX
+	JNZ URB_CHK_NL
+	JMP URB_CLOSE
+URB_CHK_NL:
+	CMP DL, 10
+	JNE URB_SKIP_LINE
+	JMP URB_FIND_LOOP
+
+URB_UPDATE:
+	ADD SI, 6
+	
+	MOV AL, [SI]
+	SUB AL, '0'
+	MOV AH, 0
+	MOV CX, 100
+	MUL CX
+	MOV BX, AX
+
+	MOV AL, [SI+1]
+	SUB AL, '0'
+	MOV AH, 0
+	MOV CX, 10
+	MUL CX
+	ADD BX, AX
+
+	MOV AL, [SI+2]
+	SUB AL, '0'
+	MOV AH, 0
+	ADD BX, AX
+
+	POP AX
+	PUSH AX
+	MOV AH, 0
+	ADD AX, BX
+
+	MOV CX, 100
+	MOV DX, 0
+	DIV CX
+	ADD AL, '0'
+	MOV [SI], AL
+
+	MOV AX, DX
+	MOV CL, 10
+	DIV CL
+	ADD AL, '0'
+	MOV [SI+1], AL
+	ADD AH, '0'
+	MOV [SI+2], AH
+
+	MOV AH, 42H
+	MOV AL, 0
+	MOV BX, fileHandle
+	XOR CX, CX
+	XOR DX, DX
+	INT 21H
+
+	MOV AH, 40H
+	MOV BX, fileHandle
+	MOV CX, repFileSize
+	LEA DX, buffer
+	INT 21H
+
+URB_CLOSE:
+	MOV AH, 3EH
+	MOV BX, fileHandle
+	INT 21H
+URB_ERR:
+	POP AX
+	RET
+UPDATE_REPORT_BOOKS ENDP
+
+; ==========================================================
+; Update User's Fines in REPORT.TXT
+; ==========================================================
+UPDATE_REPORT_FINE PROC
+	PUSH AX
+	MOV AH, 3DH
+	MOV AL, 2
+	LEA DX, RepFILE
+	INT 21H
+	JNC URF_OPEN_OK
+	JMP URF_ERR
+URF_OPEN_OK:
+	MOV fileHandle, AX
+
+	MOV AH, 3FH
+	MOV BX, fileHandle
+	MOV CX, 1000
+	LEA DX, buffer
+	INT 21H
+	MOV repFileSize, AX
+	PUSH AX
+	POP CX
+	
+	CMP CX, 0
+	JNE URF_FIND
+	JMP URF_CLOSE
+
+URF_FIND:
+	LEA SI, buffer
+URF_FIND_LOOP:
+	CMP CX, 5
+	JAE URF_COMP_START
+	JMP URF_CLOSE
+
+URF_COMP_START:
+	LEA DI, MemberID_INPUT
+	PUSH CX
+	PUSH SI
+	MOV CX, 5
+URF_COMP:
+	MOV DL, [SI]
+	CMP DL, [DI]
+	JNE URF_NEXT
+	INC SI
+	INC DI
+	LOOP URF_COMP
+	
+	POP SI
+	POP CX
+	JMP URF_UPDATE
+
+URF_NEXT:
+	POP SI
+	POP CX
+URF_SKIP_LINE:
+	MOV DL, [SI]
+	INC SI
+	DEC CX
+	JNZ URF_CHK_NL
+	JMP URF_CLOSE
+URF_CHK_NL:
+	CMP DL, 10
+	JNE URF_SKIP_LINE
+	JMP URF_FIND_LOOP
+
+URF_UPDATE:
+	ADD SI, 10
+	
+	MOV AL, [SI]
+	SUB AL, '0'
+	MOV AH, 0
+	MOV CX, 100
+	MUL CX
+	MOV BX, AX
+
+	MOV AL, [SI+1]
+	SUB AL, '0'
+	MOV AH, 0
+	MOV CX, 10
+	MUL CX
+	ADD BX, AX
+
+	MOV AL, [SI+2]
+	SUB AL, '0'
+	MOV AH, 0
+	ADD BX, AX
+
+	POP AX
+	PUSH AX
+	MOV AH, 0
+	ADD AX, BX
+
+	MOV CX, 100
+	MOV DX, 0
+	DIV CX
+	ADD AL, '0'
+	MOV [SI], AL
+
+	MOV AX, DX
+	MOV CL, 10
+	DIV CL
+	ADD AL, '0'
+	MOV [SI+1], AL
+	ADD AH, '0'
+	MOV [SI+2], AH
+
+	MOV AH, 42H
+	MOV AL, 0
+	MOV BX, fileHandle
+	XOR CX, CX
+	XOR DX, DX
+	INT 21H
+
+	MOV AH, 40H
+	MOV BX, fileHandle
+	MOV CX, repFileSize
+	LEA DX, buffer
+	INT 21H
+
+URF_CLOSE:
+	MOV AH, 3EH
+	MOV BX, fileHandle
+	INT 21H
+URF_ERR:
+	POP AX
+	RET
+UPDATE_REPORT_FINE ENDP
 
 ; ==========================================================
 ; EXPIRY CHECK ROUTINE
@@ -1690,13 +2197,16 @@ CHECK_FINE_CALC:
 BAL_IS_ENOUGH:
 	; Deduct fine & update memory variables
 	SUB MemberBalance, BL
-	ADD TotalFine, BL
-	ADD TotalRevenue, BL
+	MOV TempFine, BL  
+	MOV AL, TempFine
+	CALL UPDATE_REPORT_FINE
+	MOV AL, TempFine                 ; <--- 添加：BL里面目前存的是罚款金额
+	CALL UPDATE_REPORT_SPEND   ; <--- 添加：将罚款计入 Total Spend
 
 	MOV AH, 09H
 	LEA DX, msgFinePaid
 	INT 21H
-	MOV AL, BL
+	MOV AL, TempFine
 	CALL PRINT_NUM
 	CALL PRINT_BALANCE
 	JMP READY_TO_DELETE
@@ -1953,50 +2463,157 @@ OVERFLOW_TOPUP:
 TOP_UP ENDP
 
 ; ==========================================================
-; 4. Daily Summary Report
+; 5. Personal Summary Report (Reads from REPORT.TXT)
 ; ==========================================================
 PRINT_REPORT PROC
-	CALL CLEAR_SCREEN
-	
-	;Display Report Form
-	MOV AH, 09H
-	LEA DX, msgRepTitle
-	INT 21H
-	
-	;Display Report Form (Book Borrow)
-	LEA DX, msgRepBooks
-	INT 21H
+    CALL CLEAR_SCREEN
+    
+    MOV AH, 09H
+    LEA DX, msgRepTitle
+    INT 21H
+    
+    ; --- 打开 REPORT.TXT ---
+    MOV AH, 3DH
+    MOV AL, 0                  ; Read-only
+    LEA DX, RepFILE
+    INT 21H
+    JNC OPEN_PR_OK
+    JMP NO_REPORT_FOUND        ; 打开失败
 
-	;Display Report Detail (Book Borrow)
-	MOV AL, TotalBooks
-	CALL PRINT_NUM
+OPEN_PR_OK:
+    MOV fileHandle, AX
+    
+    ; --- 读取文件到 buffer ---
+    MOV AH, 3FH
+    MOV BX, fileHandle
+    MOV CX, 1000
+    LEA DX, buffer
+    INT 21H
+    PUSH AX                    ; 保存实际读取字节数
+    POP CX
+    
+    MOV AH, 3EH
+    MOV BX, fileHandle
+    INT 21H
+    
+    ; 检查是否至少读到了 19 字节（一条记录）
+    CMP CX, 19
+    JAE SCAN_PR
+    ; 文件太小或读取失败，跳转
+    JMP NO_REPORT_FOUND
 
-	;Display Report Form (Fine)
-	MOV AH, 09H
-	LEA DX, msgRepFine
-	INT 21H
+; ===== 调试：显示 buffer 前 20 个字符 =====
+    ; 您可以在 SCAN_PR 之前添加以下代码来检查 buffer 内容
+    ; 但为了简洁，我建议在 DISPLAY_REP_DATA 之前显示
 
-	;Display Fine Detail (Fine)
-	MOV AL, TotalFine
-	CALL PRINT_NUM
-	
-	;Display Report Form (Revenue)
-	MOV AH, 09H
-	LEA DX, msgRepSpe
-	INT 21H
+SCAN_PR:
+	LEA SI, buffer
+    CMP CX, 5
+    JAE COMP_PR_START
+    JMP NO_REPORT_FOUND
 
-	;Display Report Detail (Revenue)
-	MOV AL, TotalRevenue
-	CALL PRINT_NUM
-	
-	;Display Report Form
-	MOV AH, 09H
-	LEA DX, msgRepLine
-	INT 21H
-	
-	CALL WAIT_KEY
-	
-	RET
+COMP_PR_START:
+    LEA DI, MemberID_INPUT
+    PUSH CX
+    PUSH SI
+    MOV CX, 5
+COMP_PR:
+    MOV DL, [SI]
+    CMP DL, [DI]
+    JNE NEXT_PR
+    INC SI
+    INC DI
+    LOOP COMP_PR
+    
+    ; 匹配成功
+    POP SI
+    POP CX
+    JMP DISPLAY_REP_DATA
+
+NEXT_PR:
+    POP SI
+    POP CX
+SKIP_PR_LINE:
+    MOV DL, [SI]
+    INC SI
+    DEC CX
+    JNZ CHK_PR_NL
+    JMP NO_REPORT_FOUND
+CHK_PR_NL:
+    CMP DL, 10
+    JNE SKIP_PR_LINE
+    JMP SCAN_PR
+
+; ===== 显示报告数据 =====
+DISPLAY_REP_DATA:
+    ; ===== 显示借书量 =====
+    MOV AH, 09H
+    LEA DX, msgRepBooks
+    INT 21H
+    
+    MOV AH, 02H
+    MOV DL, [SI+6]
+    INT 21H
+    MOV DL, [SI+7]
+    INT 21H
+    MOV DL, [SI+8]
+    INT 21H
+    
+    ; ===== 显示罚款额 =====
+    MOV AH, 09H
+    LEA DX, msgRepFine
+    INT 21H
+    
+    MOV AH, 02H
+    MOV DL, [SI+10]
+    INT 21H
+    MOV DL, [SI+11]
+    INT 21H
+    MOV DL, [SI+12]
+    INT 21H
+    
+    ; ===== 显示总花费 =====
+    MOV AH, 09H
+    LEA DX, msgRepSpe
+    INT 21H
+    
+    MOV AH, 02H
+    MOV DL, [SI+14]
+    INT 21H
+    MOV DL, [SI+15]
+    INT 21H
+    MOV DL, [SI+16]
+    INT 21H
+    
+    JMP PR_FINISH
+
+NO_REPORT_FOUND:
+    ; 显示 000
+    MOV AH, 09H
+    LEA DX, msgRepBooks
+    INT 21H
+    MOV AL, 0
+    CALL PRINT_NUM
+    
+    MOV AH, 09H
+    LEA DX, msgRepFine
+    INT 21H
+    MOV AL, 0
+    CALL PRINT_NUM
+    
+    MOV AH, 09H
+    LEA DX, msgRepSpe
+    INT 21H
+    MOV AL, 0
+    CALL PRINT_NUM
+
+PR_FINISH:
+    MOV AH, 09H
+    LEA DX, msgRepLine
+    INT 21H
+    
+    CALL WAIT_KEY
+    RET
 PRINT_REPORT ENDP
 
 PRINT_USER_STATUS PROC
