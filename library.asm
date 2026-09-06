@@ -41,10 +41,10 @@
 	
 	;==================================================================================================================
 	
-	TotalBooks 	  DB 0     ; 借出书总数
-	TotalFine     DB 0     ; 罚款总额
-	TotalRevenue  DB 0     ; 总收入
-	MemberBalance DB 50    ; 会员余额
+	TotalBooks 	  DB 0     ; Total borrowed books
+	TotalFine     DB 0     ; Total fines
+	TotalRevenue  DB 0     ; Total revenue
+	MemberBalance DB 50    ; Member balance
 	MemberTier    DB 'N'     ; 'N'=None, 'B'=Bronze, 'S'=Silver, 'G'=Gold
 	ExpiryDay     DB 0
 	ExpiryMonth   DB 0
@@ -238,8 +238,8 @@ LOGIN_ID_PAGE:
 	CALL READ_PASSWORD
 
 	; 1. Open File
-	MOV AH, 3DH
-	MOV AL, 0
+	MOV AH, 3DH            ; 3DH OPEN FILE
+	MOV AL, 0              ; Open mode: Read-only
 	LEA DX, AccFILE
 	INT 21H
 	JNC OPEN_FILE_OK
@@ -249,24 +249,24 @@ OPEN_FILE_OK:
 	MOV fileHandle, AX
 
 	; Read up to 1000 bytes
-	MOV AH, 3FH
+	MOV AH, 3FH            ; 3FH READ FILE
 	MOV BX, fileHandle
-	MOV CX, 1000
+	MOV CX, 1000           ; Bytes to read
 	LEA DX, buffer
 	INT 21H
-	PUSH AX                  ; Total bytes read
+	PUSH AX                ; PUSH AX: Save total bytes read from file
 	
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
-	POP CX
+	POP CX                 ; POP CX: Restore total bytes read into CX
 
 	CMP CX, 0
 	JNE START_PARSER
 	JMP AUTH_FAIL
 
 START_PARSER:
-	LEA SI, buffer
+	LEA SI, buffer         ; SI = Source pointer to loaded file buffer
 
 CHECK_NEXT_RECORD:
 	; Need at least 5 bytes for MemberID
@@ -295,10 +295,10 @@ CONTINUE_TO_NEXT_REC:
 
 COMPARE_RECORD_FIELDS:
 	; Compare ID (5 bytes)
-	LEA DI, MemberID_INPUT
-	PUSH CX
-	PUSH SI
-	MOV CX, 5
+	LEA DI, MemberID_INPUT ; DI = Destination pointer to inputted MemberID
+	PUSH CX                ; PUSH CX: Save remaining bytes in buffer
+	PUSH SI                ; PUSH SI: Save current position in buffer
+	MOV CX, 5              ; CX = Set loop counter to 5 for ID compare
 	
 COMPARE_REC_ID:
 	MOV AL, [SI]
@@ -314,8 +314,8 @@ COMPARE_REC_ID:
 	INC SI
 
 	; Compare Password (5 bytes)
-	LEA DI, Password_INPUT
-	MOV CX, 5
+	LEA DI, Password_INPUT ; DI = Destination pointer to inputted Password
+	MOV CX, 5              ; CX = Set loop counter to 5 for Pass compare
 	
 COMPARE_REC_PASS:
 	MOV AL, [SI]
@@ -391,16 +391,16 @@ EXTRACT_BAL_FIELDS:
 	SUB AL, '0'
 	MOV ExpiryMonth, AL
 
-	POP SI
-	POP CX
+	POP SI                   ; POP SI: Restore buffer pointer to start of this user's row
+	POP CX                   ; POP CX: Restore buffer remaining bytes counter
 
 	; Check subscription validity against current date
 	CALL CHECK_EXPIRY_STATUS
 	JMP MAIN_MENU
 
 RECORD_MISMATCH:
-	POP SI
-	POP CX
+	POP SI                   ; POP SI: Restore buffer pointer to start of this user's row
+	POP CX                   ; POP CX: Restore buffer remaining bytes counter
 
 SKIP_LINE:
 	MOV AL, [SI]
@@ -427,19 +427,19 @@ TOO_MANY_TRIES_BRIDGE:
 	JMP TOO_MANY_TRIES
 
 ERROR_OPEN:
-	MOV AH, 3CH
-	MOV CX, 0
+	MOV AH, 3CH            ; 3CH CREATE FILE
+	MOV CX, 0              ; Normal file attributes
 	LEA DX, AccFILE
 	INT 21H
 	MOV fileHandle, AX
 
-	MOV AH, 40H
+	MOV AH, 40H            ; 40H WRITE DATA TO FILE
 	MOV BX, fileHandle
 	MOV CX, msgLen
 	LEA DX, logMsg
 	INT 21H
 
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
 	JMP LOGIN_ID_PAGE
@@ -484,25 +484,25 @@ SHOW_MENU2:
 	
 	;------------------ Switch ------------------
 	CMP CHOICE, '1'
-	JE BORROW_BOOK_PAGE    ;Borrow Book
+	JE BORROW_BOOK_PAGE    ; Borrow Book
 	
 	CMP CHOICE, '2'
-	JE SUBSCRIBE_PAGE    ;SUBSCRIBE MEMBER
+	JE SUBSCRIBE_PAGE      ; Subscribe Member
 	
 	CMP CHOICE, '3'
-	JE TOP_UP_PAGE         ;Top Up
+	JE TOP_UP_PAGE         ; Top Up
 	
 	CMP CHOICE, '4'
-	JE RETURN_BOOK_PAGE   ;Return Book
+	JE RETURN_BOOK_PAGE    ; Return Book
 	
 	CMP CHOICE, '5'
-	JE SHOW_REPORT_PAGE		;View Report
+	JE SHOW_REPORT_PAGE	   ; View Report
 	
 	CMP CHOICE,'6'
-	JE SELECT_PAGE_BRIDGE			;Logout
+	JE SELECT_PAGE_BRIDGE  ; Logout
 	
 	CMP CHOICE, '0'
-	JE FIN                 ; 退出系统
+	JE FIN                 ; Exit system
 	
 	MOV CHOICE_STATUS,1
 	JMP MAIN_MENU
@@ -532,7 +532,7 @@ SHOW_REPORT_PAGE:
 
 FIN:
 	CALL CLEAR_SCREEN
-	MOV AX, 4C00H
+	MOV AX, 4C00H          ; 4C00H TERMINATE PROGRAM
 	INT 21H
 MAIN ENDP
 
@@ -552,7 +552,7 @@ REGISTER_MEMBER PROC
 	INT 21H
 	CALL READ_USERNAME
 	
-	LEA SI, MemberID_INPUT
+	LEA SI, MemberID_INPUT ; SI = Pointer to user-entered Member ID
 
 	; Check 1st character: Must be 'M'
 	CMP BYTE PTR [SI], 'M'
@@ -580,39 +580,39 @@ DIGIT_FAIL:
 
 PROCEED_DUP_CHECK:
 	; Check if Member ID already exists in file
-	MOV AH, 3DH
-	MOV AL, 0                   ; Open Read-Only
+	MOV AH, 3DH            ; 3DH OPEN FILE
+	MOV AL, 0              ; Open Read-Only
 	LEA DX, AccFILE
 	INT 21H
 	JC  PROCEED_TO_PASS         ; If file doesn't exist yet, ID is unique
 	MOV fileHandle, AX
 
 	; Read file into buffer
-	MOV AH, 3FH
+	MOV AH, 3FH            ; 3FH READ FILE
 	MOV BX, fileHandle
 	MOV CX, 1000
 	LEA DX, buffer
 	INT 21H
-	PUSH AX                     ; Save bytes read
+	PUSH AX                ; PUSH AX: Save bytes read
 	
-	MOV AH, 3EH                 ; Close file handle
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
-	POP CX                      ; CX = total bytes read
+	POP CX                 ; POP CX: CX = total bytes read
 
 	CMP CX, 0
 	JE  PROCEED_TO_PASS         ; File empty -> unique
 
 	; Scan buffer records for duplicate ID
-	LEA SI, buffer
+	LEA SI, buffer         ; SI = Pointer to file buffer
 
 CHECK_DUP_RECORD:
 	CMP CX, 5
 	JB  PROCEED_TO_PASS         ; Remaining bytes less than ID length -> done scanning
 
-	LEA DI, MemberID_INPUT
-	PUSH CX
-	PUSH SI
+	LEA DI, MemberID_INPUT ; DI = Pointer to input Member ID
+	PUSH CX                ; PUSH CX: Save buffer remaining bytes
+	PUSH SI                ; PUSH SI: Save buffer pointer location
 	MOV CX, 5
 	
 COMPARE_DUP_ID:
@@ -624,13 +624,13 @@ COMPARE_DUP_ID:
 	LOOP COMPARE_DUP_ID
 
 	; Duplicate match found!
-	POP SI
-	POP CX
+	POP SI                   ; POP SI: Restore pointer to matched record
+	POP CX                   ; POP CX: Restore buffer bytes count
 	JMP REG_DUPLICATE_ID
 
 DUP_MISMATCH:
-	POP SI
-	POP CX
+	POP SI                   ; POP SI: Restore pointer to row start
+	POP CX                   ; POP CX: Restore remaining bytes count
 
 SKIP_DUP_LINE:
 	MOV AL, [SI]
@@ -649,10 +649,10 @@ PROCEED_TO_PASS:
 	CALL READ_PASSWORD
 
 	; 3. Format buffer: [ID:5] + [','] + [Pass:5] + [','] + ['050':3] + [0DH] + [0AH]
-	LEA DI, RegRecord
+	LEA DI, RegRecord      ; DI = Pointer to Registration Record Buffer
 	
 	; Copy ID (5 bytes)
-	LEA SI, MemberID_INPUT
+	LEA SI, MemberID_INPUT ; SI = Pointer to input Member ID
 	MOV CX, 5
 COPY_REG_ID:
 	MOV AL, [SI]
@@ -666,7 +666,7 @@ COPY_REG_ID:
 	INC DI
 	
 	; Copy Password (5 bytes)
-	LEA SI, Password_INPUT
+	LEA SI, Password_INPUT ; SI = Pointer to input Password
 	MOV CX, 5
 COPY_REG_PASS:
 	MOV AL, [SI]
@@ -718,14 +718,14 @@ COPY_REG_PASS:
 	MOV BYTE PTR [DI], 10       ; LF
 	
 	; 4. Open account.txt (Read/Write Access: AL = 2)
-	MOV AH, 3DH
+	MOV AH, 3DH            ; 3DH OPEN FILE
 	MOV AL, 2
 	LEA DX, AccFILE
 	INT 21H
 	JNC OPEN_REG_OK
 
 	; Create file if missing
-	MOV AH, 3CH
+	MOV AH, 3CH            ; 3CH CREATE FILE
 	MOV CX, 0
 	LEA DX, AccFILE
 	INT 21H
@@ -737,18 +737,18 @@ OPEN_REG_OK:
 	MOV fileHandle, AX
 
 	; 5. Seek to End of File (AL = 2, CX:DX = 0)
-	MOV AH, 42H
-	MOV AL, 2
+	MOV AH, 42H            ; 42H MOVE FILE POINTER
+	MOV AL, 2              ; Move from EOF
 	MOV BX, fileHandle
-	XOR CX, CX							;EXPLIAN!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1	
-	XOR DX, DX							;EXPLIAN!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
+	XOR CX, CX			   ; CX = 0 (High word of offset - means move 0 bytes)
+	XOR DX, DX			   ; DX = 0 (Low word of offset - means move 0 bytes)
 	INT 21H
 	JNC WRITE_REGISTER_RECORD
 	JMP REG_FILE_ERROR
 
 WRITE_REGISTER_RECORD:
 	; 6. Append 24-byte record (Single write)
-	MOV AH, 40H
+	MOV AH, 40H            ; 40H WRITE DATA TO FILE
 	MOV BX, fileHandle
 	MOV CX, 25
 	LEA DX, RegRecord
@@ -758,17 +758,17 @@ WRITE_REGISTER_RECORD:
 	
 CLOSE_ACCOUNT_FILE:
 	; 7. Close file handle
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
 
 	; ==========================================================
 	; Initialize REPORT.TXT for the new member
 	; ==========================================================
-	LEA DI, repInitRecord
+	LEA DI, repInitRecord  ; DI = Pointer to init record buffer
 	
-	; 1. 复制新注册的 Member ID (5 bytes)
-	LEA SI, MemberID_INPUT
+	; 1. Copy newly registered Member ID (5 bytes)
+	LEA SI, MemberID_INPUT ; SI = Pointer to inputted ID
 	MOV CX, 5
 COPY_REP_ID:
 	MOV AL, [SI]
@@ -777,7 +777,7 @@ COPY_REP_ID:
 	INC DI
 	LOOP COPY_REP_ID
 	
-	; 2. 写入 ",000,000,000" (12 bytes)
+	; 2. Write ",000,000,000" (12 bytes)
 	MOV BYTE PTR [DI], ','
 	INC DI
 	MOV CX, 3
@@ -800,43 +800,43 @@ REP_Z3: MOV [DI], AL
 	INC DI
 	LOOP REP_Z3
 	
-	; 3. 添加 CRLF (2 bytes)
+	; 3. Add CRLF (2 bytes)
 	MOV BYTE PTR [DI], 13
 	INC DI
 	MOV BYTE PTR [DI], 10
 	
-	; 4. 追加写入到 REPORT.TXT 末尾
-	MOV AH, 3DH
+	; 4. Append to EOF of REPORT.TXT
+	MOV AH, 3DH            ; 3DH OPEN FILE
 	MOV AL, 2
 	LEA DX, RepFILE
 	INT 21H
 	JNC OPEN_REP_OK
 	
-	; 如果文件不存在，创建它
-	MOV AH, 3CH
+	; If file doesn't exist, create it
+	MOV AH, 3CH            ; 3CH CREATE FILE
 	MOV CX, 0
 	LEA DX, RepFILE
 	INT 21H
 OPEN_REP_OK:
 	MOV fileHandle, AX
 	
-	; 移到文件末尾 (EOF)
-	MOV AH, 42H
+	; Move to End of File (EOF)
+	MOV AH, 42H            ; 42H MOVE FILE POINTER
 	MOV AL, 2
 	MOV BX, fileHandle
 	XOR CX, CX
 	XOR DX, DX
 	INT 21H
 	
-	; 写入 19 bytes
-	MOV AH, 40H
+	; Write 19 bytes
+	MOV AH, 40H            ; 40H WRITE DATA TO FILE
 	MOV BX, fileHandle
 	MOV CX, 19
 	LEA DX, repInitRecord
 	INT 21H
 	
-	; 关闭文件
-	MOV AH, 3EH
+	; Close file
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
 	; ==========================================================
@@ -859,7 +859,7 @@ REG_DUPLICATE_ID:
 	JMP REG_DONE
 
 REG_FILE_ERROR:
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
 
@@ -901,50 +901,50 @@ SHOW_BOOK_LIST:
 	INT 21H
 	
 	; Open book.txt (Read-Only)
-	MOV AH, 3DH
+	MOV AH, 3DH            ; 3DH OPEN FILE
 	MOV AL, 0
 	LEA DX, BookFILE
 	INT 21H
 	JNC READ_BOOKS_OK
 	
 	; If missing, create default
-	MOV AH, 3CH
+	MOV AH, 3CH            ; 3CH CREATE FILE
 	MOV CX, 0
 	LEA DX, BookFILE
 	INT 21H
 	MOV fileHandle, AX
 	
-	MOV AH, 40H
+	MOV AH, 40H            ; 40H WRITE DATA TO FILE
 	MOV BX, fileHandle
 	MOV CX, defaultBookLen
 	LEA DX, defaultBooks
 	INT 21H
 	
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
 	JMP SHOW_BOOK_LIST
 
 READ_BOOKS_OK:
 	MOV fileHandle, AX
-	MOV AH, 3FH
+	MOV AH, 3FH            ; 3FH READ FILE
 	MOV BX, fileHandle
-	MOV CX, 320                ; Read exactly 10 books (10 * 32 = 320 bytes)
+	MOV CX, 320            ; Read exactly 10 books (10 * 32 = 320 bytes)
 	LEA DX, bookBuffer
 	INT 21H
-	PUSH AX                    ; Save actual bytes read
+	PUSH AX                ; PUSH AX: Save actual bytes read
 	
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
 	
-	POP CX                     ; CX = Bytes read
+	POP CX                 ; POP CX: CX = Bytes read
 	CMP CX, 0
 	JNZ PROCEED_PRINT_BOOKS    ; [Fix] Trampoline jump to skip the error
 	JMP BOOK_NOT_FOUND
 
 PROCEED_PRINT_BOOKS:
-	LEA SI, bookBuffer
+	LEA SI, bookBuffer     ; SI = Source pointer to book catalog buffer
 
 	; Print all 10 books directly to screen
 	
@@ -963,11 +963,11 @@ PRINT_BOOKS_LOOP:
 	INT 21H
 	
 	; Flush keyboard buffer first to prevent accidental skips
-	MOV AH, 0CH
+	MOV AH, 0CH            ; 0CH FLUSH KEYBOARD BUFFER
 	MOV AL, 0
 	INT 21H
 
-	LEA SI, BookID_INPUT
+	LEA SI, BookID_INPUT   ; SI = Destination pointer for input Book ID
 	MOV CX, 5
 READ_BK_ID:
 	MOV AH, 01H
@@ -985,8 +985,8 @@ READ_BK_ID:
 	; ==================================================
 	; 2.5 Check if User Already Borrowed This Book
 	; ==================================================
-	MOV AH, 3DH
-	MOV AL, 0                   ; Open Read-Only
+	MOV AH, 3DH            ; 3DH OPEN FILE
+	MOV AL, 0              ; Open Read-Only
 	LEA DX, BorrowFILE
 	INT 21H
 	JNC OPEN_BORROW_CHK_OK
@@ -994,17 +994,17 @@ READ_BK_ID:
 OPEN_BORROW_CHK_OK:
 	MOV fileHandle, AX
 	
-	MOV AH, 3FH
+	MOV AH, 3FH            ; 3FH READ FILE
 	MOV BX, fileHandle
 	MOV CX, 1000
-	LEA DX, buffer              ; Read file into buffer
+	LEA DX, buffer         ; Read file into buffer
 	INT 21H
-	PUSH AX                     ; Save bytes read
+	PUSH AX                ; PUSH AX: Save bytes read
 	
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
-	POP CX                      ; CX = Total bytes read
+	POP CX                 ; POP CX: CX = Total bytes read
 
 	CMP CX, 0
 	JNE SCAN_CHK_BORROW
@@ -1017,14 +1017,14 @@ SCAN_CHK_BORROW:
 
 COMP_CHK_MID:
 	; Check Member ID First
-	LEA DI, MemberID_INPUT
-	PUSH CX
-	PUSH SI
+	LEA DI, MemberID_INPUT ; DI = Pointer to input Member ID
+	PUSH CX                ; PUSH CX: Save remaining loop bytes
+	PUSH SI                ; PUSH SI: Save row pointer
 	MOV CX, 5
 COMP_CHK_MID_LOOP:
 	MOV AL, [SI]
 	CMP AL, [DI]
-	JNE CHK_REC_MISMATCH_BRIDGE ; <--- 使用跳板
+	JNE CHK_REC_MISMATCH_BRIDGE ; <--- Trampoline jump
 	INC SI
 	INC DI
 	LOOP COMP_CHK_MID_LOOP
@@ -1035,14 +1035,14 @@ CHK_REC_MISMATCH_BRIDGE:
 
 CHECK_BOOK_ID_START:
 	; Member ID matched! Now check if Book ID matches
-	INC SI                      ; Skip ','
+	INC SI                 ; Skip ','
 	
-	LEA DI, BookID_INPUT
+	LEA DI, BookID_INPUT   ; DI = Pointer to input Book ID
 	MOV CX, 5
 COMP_CHK_BID:
 	MOV AL, [SI]
 	CMP AL, [DI]
-	JNE CHK_REC_MISMATCH_BRIDGE2 ; <--- 使用跳板
+	JNE CHK_REC_MISMATCH_BRIDGE2 ; <--- Trampoline jump
 	INC SI
 	INC DI
 	LOOP COMP_CHK_BID
@@ -1055,8 +1055,8 @@ ALREADY_BORROWED_ERR_BRIDGE:
 	JMP ALREADY_BORROWED_ERR
 
 CHK_REC_MISMATCH:
-	POP SI                      
-	POP CX                      
+	POP SI                 ; POP SI: Restore start of row pointer
+	POP CX                 ; POP CX: Restore remaining buffer bytes
 
 SKIP_CHK_LINE:
 	CMP CX, 0
@@ -1077,18 +1077,16 @@ ALREADY_BORROWED_ERR:
 	JMP BORROW_EXIT             
 
 PROCEED_TO_CATALOG:
-	; ==================================================
-
 	; --------------------------------------------------
 	; 3. Scan bookBuffer for Book ID (10 Records)
 	; --------------------------------------------------
-	LEA SI, bookBuffer
-	MOV CX, 10                 ; Search 10 records only
+	LEA SI, bookBuffer     ; SI = Pointer to book catalog buffer
+	MOV CX, 10             ; Search 10 records only
 
 SCAN_BOOK_EXIST:
-	LEA DI, BookID_INPUT
-	PUSH CX
-	PUSH SI
+	LEA DI, BookID_INPUT   ; DI = Pointer to target input Book ID
+	PUSH CX                ; PUSH CX: Save row counter (10 max)
+	PUSH SI                ; PUSH SI: Save book row pointer
 	MOV CX, 5
 COMPARE_BK_ID:
 	MOV AL, [SI]
@@ -1099,14 +1097,14 @@ COMPARE_BK_ID:
 	LOOP COMPARE_BK_ID
 	
 	; Match found!
-	POP SI                     ; SI = Start of matched 32-byte book record
-	POP CX
+	POP SI                 ; POP SI: SI = Start of matched 32-byte book record
+	POP CX                 ; POP CX: Clean stack from loop
 	JMP BOOK_VALID_FOUND
 
 BK_MISMATCH:
-	POP SI
-	POP CX
-	ADD SI, 32                 ; Advance to next 32-byte row
+	POP SI                 ; POP SI: Restore book row start
+	POP CX                 ; POP CX: Restore row counter
+	ADD SI, 32             ; Advance to next 32-byte row
 	LOOP SCAN_BOOK_EXIST
 
 	; [Fix] If the loop finishes 10 times and doesn't find the book, it MUST go to the error!
@@ -1145,19 +1143,19 @@ DEC_UNITS:
 
 UPDATE_BOOK_FILE:
 	; Save updated quantity back to book.txt
-	MOV AH, 3DH
-	MOV AL, 1                  ; Write-Only
+	MOV AH, 3DH            ; 3DH OPEN FILE
+	MOV AL, 1              ; Write-Only
 	LEA DX, BookFILE
 	INT 21H
 	MOV fileHandle, AX
 
-	MOV AH, 40H
+	MOV AH, 40H            ; 40H WRITE DATA TO FILE
 	MOV BX, fileHandle
 	MOV CX, 320
 	LEA DX, bookBuffer
 	INT 21H
 
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
 
@@ -1165,15 +1163,15 @@ UPDATE_BOOK_FILE:
 ; 5. Build Borrow Record (Strict 20-Byte Row Format)
 ; Format: [MemberID:5] + ',' + [BookID:5] + ',' + [DD:2] + ',' + [MM:2] + [0DH, 0AH]
 ; ----------------------------------------------------------
-	MOV AH, 2AH                ; Get real-time DOS date
+	MOV AH, 2AH            ; 2AH GET SYSTEM DATE
 	INT 21H
 	MOV BorrowDay, DL
 	MOV BorrowMonth, DH
 	
-	LEA DI, BorrowRecord
+	LEA DI, BorrowRecord   ; DI = Pointer to newly built Borrow Record Buffer
 	
 	; Copy Member ID (5 bytes)
-	LEA SI, MemberID_INPUT
+	LEA SI, MemberID_INPUT ; SI = Pointer to Input Member ID
 	MOV CX, 5
 CP_M_ID:
 	MOV AL, [SI]
@@ -1186,7 +1184,7 @@ CP_M_ID:
 	INC DI
 	
 	; Copy Book ID (5 bytes)
-	LEA SI, BookID_INPUT
+	LEA SI, BookID_INPUT   ; SI = Pointer to Input Book ID
 	MOV CX, 5
 CP_B_ID:
 	MOV AL, [SI]
@@ -1233,14 +1231,14 @@ CP_B_ID:
 ; ----------------------------------------------------------
 ; 6. Append to borrowed.txt (Always at file end)
 ; ----------------------------------------------------------
-	MOV AH, 3DH
-	MOV AL, 2                  ; Read/Write Access
+	MOV AH, 3DH            ; 3DH OPEN FILE
+	MOV AL, 2              ; Read/Write Access
 	LEA DX, BorrowFILE
 	INT 21H
 	JNC OPEN_BORROW_OK
 	
 	; If file doesn't exist, create it
-	MOV AH, 3CH
+	MOV AH, 3CH            ; 3CH CREATE FILE
 	MOV CX, 0
 	LEA DX, BorrowFILE
 	INT 21H
@@ -1249,7 +1247,7 @@ OPEN_BORROW_OK:
 	MOV fileHandle, AX
 	
 	; Seek EOF so it always writes to a new line at the end
-	MOV AH, 42H
+	MOV AH, 42H            ; 42H MOVE FILE POINTER
 	MOV AL, 2
 	MOV BX, fileHandle
 	XOR CX, CX
@@ -1257,13 +1255,13 @@ OPEN_BORROW_OK:
 	INT 21H
 	
 	; Write fixed 19-byte row
-	MOV AH, 40H
+	MOV AH, 40H            ; 40H WRITE DATA TO FILE
 	MOV BX, fileHandle
 	MOV CX, 19
 	LEA DX, BorrowRecord
 	INT 21H
 	
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
 	
@@ -1331,8 +1329,8 @@ SUB_BRONZE:
 	CMP MemberBalance, 50
 	JB  SUB_NO_MONEY
 	SUB MemberBalance, 50
-	MOV AL, 50                 ; <--- 添加：将花费金额放入 AL
-	CALL UPDATE_REPORT_SPEND   ; <--- 添加：呼叫更新报告功能
+	MOV AL, 50                 ; Add: Put spent amount into AL
+	CALL UPDATE_REPORT_SPEND   ; Add: Call update report function
 	MOV MemberTier, 'B'
 	JMP SET_EXPIRY_DATE
 
@@ -1340,8 +1338,8 @@ SUB_SILVER:
 	CMP MemberBalance, 75
 	JB  SUB_NO_MONEY
 	SUB MemberBalance, 75
-	MOV AL, 75                 ; <--- 添加：将花费金额放入 AL
-	CALL UPDATE_REPORT_SPEND   ; <--- 添加：呼叫更新报告功能
+	MOV AL, 75                 ; Add: Put spent amount into AL
+	CALL UPDATE_REPORT_SPEND   ; Add: Call update report function
 	MOV MemberTier, 'S'
 	JMP SET_EXPIRY_DATE
 
@@ -1349,8 +1347,8 @@ SUB_GOLD:
 	CMP MemberBalance, 100
 	JB  SUB_NO_MONEY
 	SUB MemberBalance, 100
-	MOV AL, 100                ; <--- 添加：将花费金额放入 AL
-	CALL UPDATE_REPORT_SPEND   ; <--- 添加：呼叫更新报告功能
+	MOV AL, 100                ; Add: Put spent amount into AL
+	CALL UPDATE_REPORT_SPEND   ; Add: Call update report function
 	MOV MemberTier, 'G'
 	JMP SET_EXPIRY_DATE
 
@@ -1363,7 +1361,7 @@ SUB_NO_MONEY:
 
 SET_EXPIRY_DATE:
 	; Fetch real-time DOS date: DH = Month, DL = Day
-	MOV AH, 2AH
+	MOV AH, 2AH            ; 2AH GET SYSTEM DATE
 	INT 21H
 	
 	; Expiry is 30 days = same day next month
@@ -1390,8 +1388,8 @@ SUBSCRIBE_TIER ENDP
 ; Input: AL = Amount spent (RM)
 ; ==========================================================
 UPDATE_REPORT_SPEND PROC
-	PUSH AX                    
-	MOV AH, 3DH
+	PUSH AX                ; PUSH AX: Save spent amount    
+	MOV AH, 3DH            ; 3DH OPEN FILE
 	MOV AL, 2
 	LEA DX, RepFILE
 	INT 21H
@@ -1400,21 +1398,21 @@ UPDATE_REPORT_SPEND PROC
 URS_OPEN_OK:
 	MOV fileHandle, AX
 
-	MOV AH, 3FH
+	MOV AH, 3FH            ; 3FH READ FILE
 	MOV BX, fileHandle
 	MOV CX, 1000
 	LEA DX, buffer
 	INT 21H
 	MOV repFileSize, AX
-	PUSH AX
-	POP CX
+	PUSH AX                ; PUSH AX: Save bytes read
+	POP CX                 ; POP CX: Restore into CX
 	
 	CMP CX, 0
 	JNE URS_FIND
 	JMP URS_CLOSE              ; <--- Bridge Jump
 
 URS_FIND:
-	LEA SI, buffer
+	LEA SI, buffer         ; SI = Source pointer to read buffer
 
 
 URS_FIND_LOOP:
@@ -1423,9 +1421,9 @@ URS_FIND_LOOP:
     JMP URS_CLOSE             ; <--- Bridge Jump
 
 URS_COMP_START:
-	LEA DI, MemberID_INPUT
-	PUSH CX
-	PUSH SI
+	LEA DI, MemberID_INPUT ; DI = Pointer to matched member ID
+	PUSH CX                ; PUSH CX: Save remaining loop bytes
+	PUSH SI                ; PUSH SI: Save row pointer
 	MOV CX, 5
 URS_COMP:
 	MOV DL, [SI]
@@ -1435,13 +1433,13 @@ URS_COMP:
 	INC DI
 	LOOP URS_COMP
 	
-	POP SI
-	POP CX
+	POP SI                 ; POP SI: Row pointer
+	POP CX                 ; POP CX: Remaining bytes
 	JMP URS_UPDATE
 
 URS_NEXT:
-	POP SI
-	POP CX
+	POP SI                 ; POP SI: Restore start row
+	POP CX                 ; POP CX: Restore buffer remainder
 URS_SKIP_LINE:
 	MOV DL, [SI]
 	INC SI
@@ -1475,8 +1473,8 @@ URS_UPDATE:
 	MOV AH, 0
 	ADD BX, AX                 
 
-	POP AX                     
-	PUSH AX                    
+	POP AX                     ; POP AX: Restore spent amount
+	PUSH AX                    ; PUSH AX: Re-save spent amount
 	MOV AH, 0
 	ADD AX, BX                 
 
@@ -1494,14 +1492,14 @@ URS_UPDATE:
 	ADD AH, '0'
 	MOV [SI+2], AH             
 
-	MOV AH, 42H
+	MOV AH, 42H            ; 42H MOVE FILE POINTER
 	MOV AL, 0                  
 	MOV BX, fileHandle
 	XOR CX, CX
 	XOR DX, DX
 	INT 21H
 
-	MOV AH, 40H
+	MOV AH, 40H            ; 40H WRITE DATA TO FILE
 	MOV BX, fileHandle
 	MOV CX, repFileSize
 	LEA DX, buffer
@@ -1517,11 +1515,11 @@ URS_UPDATE:
 	URS_WRITE_OK:
 		
 URS_CLOSE:
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
 URS_ERR:
-	POP AX
+	POP AX                 ; POP AX: Final stack clean for spent amount
 	RET
 UPDATE_REPORT_SPEND ENDP
 
@@ -1529,8 +1527,8 @@ UPDATE_REPORT_SPEND ENDP
 ; Update User's Borrowed Books in REPORT.TXT
 ; ==========================================================
 UPDATE_REPORT_BOOKS PROC
-	PUSH AX
-	MOV AH, 3DH
+	PUSH AX                ; PUSH AX: Protect AX data
+	MOV AH, 3DH            ; 3DH OPEN FILE
 	MOV AL, 2
 	LEA DX, RepFILE
 	INT 21H
@@ -1539,30 +1537,30 @@ UPDATE_REPORT_BOOKS PROC
 URB_OPEN_OK:
 	MOV fileHandle, AX
 
-	MOV AH, 3FH
+	MOV AH, 3FH            ; 3FH READ FILE
 	MOV BX, fileHandle
 	MOV CX, 1000
 	LEA DX, buffer
 	INT 21H
 	MOV repFileSize, AX
-	PUSH AX
-	POP CX
+	PUSH AX                ; PUSH AX: Bytes read
+	POP CX                 ; POP CX: Buffer count
 	
 	CMP CX, 0
 	JNE URB_FIND
 	JMP URB_CLOSE
 
 URB_FIND:
-	LEA SI, buffer
+	LEA SI, buffer         ; SI = Source pointer to buffer
 URB_FIND_LOOP:
 	CMP CX, 5
 	JAE URB_COMP_START
 	JMP URB_CLOSE
 
 URB_COMP_START:
-	LEA DI, MemberID_INPUT
-	PUSH CX
-	PUSH SI
+	LEA DI, MemberID_INPUT ; DI = Pointer to target ID
+	PUSH CX                ; PUSH CX: Buffer bytes
+	PUSH SI                ; PUSH SI: Row start
 	MOV CX, 5
 URB_COMP:
 	MOV DL, [SI]
@@ -1572,13 +1570,13 @@ URB_COMP:
 	INC DI
 	LOOP URB_COMP
 	
-	POP SI
-	POP CX
+	POP SI                 ; POP SI: Row match pointer
+	POP CX                 ; POP CX: Buffer bytes remaning
 	JMP URB_UPDATE
 
 URB_NEXT:
-	POP SI
-	POP CX
+	POP SI                 ; POP SI: Row fail start
+	POP CX                 ; POP CX: Buffer bytes remaining
 URB_SKIP_LINE:
 	MOV DL, [SI]
 	INC SI
@@ -1612,8 +1610,8 @@ URB_UPDATE:
 	MOV AH, 0
 	ADD BX, AX
 
-	POP AX
-	PUSH AX
+	POP AX                 ; POP AX: Restore protected data
+	PUSH AX                ; PUSH AX: Save again
 	MOV AH, 0
 	ADD AX, BX
 
@@ -1631,25 +1629,25 @@ URB_UPDATE:
 	ADD AH, '0'
 	MOV [SI+2], AH
 
-	MOV AH, 42H
+	MOV AH, 42H            ; 42H MOVE FILE POINTER
 	MOV AL, 0
 	MOV BX, fileHandle
 	XOR CX, CX
 	XOR DX, DX
 	INT 21H
 
-	MOV AH, 40H
+	MOV AH, 40H            ; 40H WRITE DATA TO FILE
 	MOV BX, fileHandle
 	MOV CX, repFileSize
 	LEA DX, buffer
 	INT 21H
 
 URB_CLOSE:
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
 URB_ERR:
-	POP AX
+	POP AX                 ; POP AX: Final stack clean
 	RET
 UPDATE_REPORT_BOOKS ENDP
 
@@ -1657,8 +1655,8 @@ UPDATE_REPORT_BOOKS ENDP
 ; Update User's Fines in REPORT.TXT
 ; ==========================================================
 UPDATE_REPORT_FINE PROC
-	PUSH AX
-	MOV AH, 3DH
+	PUSH AX                ; PUSH AX: Save fine amount
+	MOV AH, 3DH            ; 3DH OPEN FILE
 	MOV AL, 2
 	LEA DX, RepFILE
 	INT 21H
@@ -1667,30 +1665,30 @@ UPDATE_REPORT_FINE PROC
 URF_OPEN_OK:
 	MOV fileHandle, AX
 
-	MOV AH, 3FH
+	MOV AH, 3FH            ; 3FH READ FILE
 	MOV BX, fileHandle
 	MOV CX, 1000
 	LEA DX, buffer
 	INT 21H
 	MOV repFileSize, AX
-	PUSH AX
-	POP CX
+	PUSH AX                ; PUSH AX: Save bytes read
+	POP CX                 ; POP CX: Set buffer bytes counter
 	
 	CMP CX, 0
 	JNE URF_FIND
 	JMP URF_CLOSE
 
 URF_FIND:
-	LEA SI, buffer
+	LEA SI, buffer         ; SI = Buffer source pointer
 URF_FIND_LOOP:
 	CMP CX, 5
 	JAE URF_COMP_START
 	JMP URF_CLOSE
 
 URF_COMP_START:
-	LEA DI, MemberID_INPUT
-	PUSH CX
-	PUSH SI
+	LEA DI, MemberID_INPUT ; DI = Target ID pointer
+	PUSH CX                ; PUSH CX: Save buffer counter
+	PUSH SI                ; PUSH SI: Save line pointer
 	MOV CX, 5
 URF_COMP:
 	MOV DL, [SI]
@@ -1700,13 +1698,13 @@ URF_COMP:
 	INC DI
 	LOOP URF_COMP
 	
-	POP SI
-	POP CX
+	POP SI                 ; POP SI: Matched row pointer
+	POP CX                 ; POP CX: Buffer count
 	JMP URF_UPDATE
 
 URF_NEXT:
-	POP SI
-	POP CX
+	POP SI                 ; POP SI: Restore row start
+	POP CX                 ; POP CX: Restore buffer count
 URF_SKIP_LINE:
 	MOV DL, [SI]
 	INC SI
@@ -1740,8 +1738,8 @@ URF_UPDATE:
 	MOV AH, 0
 	ADD BX, AX
 
-	POP AX
-	PUSH AX
+	POP AX                 ; POP AX: Restore fine amount
+	PUSH AX                ; PUSH AX: Save again
 	MOV AH, 0
 	ADD AX, BX
 
@@ -1759,25 +1757,25 @@ URF_UPDATE:
 	ADD AH, '0'
 	MOV [SI+2], AH
 
-	MOV AH, 42H
+	MOV AH, 42H            ; 42H MOVE FILE POINTER
 	MOV AL, 0
 	MOV BX, fileHandle
 	XOR CX, CX
 	XOR DX, DX
 	INT 21H
 
-	MOV AH, 40H
+	MOV AH, 40H            ; 40H WRITE DATA TO FILE
 	MOV BX, fileHandle
 	MOV CX, repFileSize
 	LEA DX, buffer
 	INT 21H
 
 URF_CLOSE:
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
 URF_ERR:
-	POP AX
+	POP AX                 ; POP AX: Clean fine amount from stack
 	RET
 UPDATE_REPORT_FINE ENDP
 
@@ -1788,7 +1786,7 @@ CHECK_EXPIRY_STATUS PROC
 	CMP MemberTier, 'N'
 	JE  EXP_DONE
 
-	MOV AH, 2AH
+	MOV AH, 2AH            ; 2AH GET SYSTEM DATE
 	INT 21H
 	MOV CurrentDay, DL
 	MOV CurrentMonth, DH
@@ -1818,7 +1816,7 @@ EXP_DONE:
 CHECK_EXPIRY_STATUS ENDP
 
 ; ==========================================================
-; 2. RETURN BOOK (Protected Stack, Safe Buffer, No 乱码)
+; 2. RETURN BOOK (Protected Stack, Safe Buffer, No Gibberish)
 ; ==========================================================
 RETURN_BOOK PROC
 	CALL CLEAR_SCREEN
@@ -1833,7 +1831,7 @@ RETURN_BOOK PROC
 	LEA DX, msgBorrowedListTitle
 	INT 21H
 
-	MOV AH, 3DH
+	MOV AH, 3DH            ; 3DH OPEN FILE
 	MOV AL, 0
 	LEA DX, BorrowFILE
 	INT 21H
@@ -1842,24 +1840,24 @@ RETURN_BOOK PROC
 
 OPEN_BORROW_LIST_OK:
 	MOV fileHandle, AX
-	MOV AH, 3FH
+	MOV AH, 3FH            ; 3FH READ FILE
 	MOV BX, fileHandle
 	MOV CX, 1000
 	LEA DX, buffer
 	INT 21H
-	PUSH AX
+	PUSH AX                ; PUSH AX: Save bytes read
 	
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
-	POP CX
+	POP CX                 ; POP CX: Buffer content length
 
 	CMP CX, 0
 	JNE START_LIST_SCAN
 	JMP NO_BORROWED_LIST
 
 START_LIST_SCAN:
-	LEA SI, buffer
+	LEA SI, buffer         ; SI = Source pointer to buffer array
 
 SCAN_USER_BORROWS:
 	CMP CX, 5
@@ -1883,9 +1881,9 @@ SKIP_LIST_CHAR:
 	JMP CHECK_BORROW_COUNT
 
 COMPARE_LIST_ENTRY:
-	LEA DI, MemberID_INPUT
-	PUSH CX
-	PUSH SI
+	LEA DI, MemberID_INPUT ; DI = Pointer to targeted user ID
+	PUSH CX                ; PUSH CX: Protect main loop counter
+	PUSH SI                ; PUSH SI: Protect pointer to row beginning
 	MOV CX, 5
 COMPARE_USER_LIST:
 	MOV AL, [SI]
@@ -1951,13 +1949,13 @@ PRINT_5_CHAR_BK:
 	INT 21H
 
 	; Restore pointers to the exact start of the line to sync CX safely
-	POP SI
-	POP CX
+	POP SI                 ; POP SI: Original row start
+	POP CX                 ; POP CX: Buffer array counter
 	JMP SKIP_TO_NEXT_LINE
 
 LIST_MISMATCH:
-	POP SI
-	POP CX
+	POP SI                 ; POP SI: Original row start on mismatch
+	POP CX                 ; POP CX: Main loop byte counter
 
 SKIP_TO_NEXT_LINE:
 	MOV AL, [SI]
@@ -1986,11 +1984,11 @@ PROMPT_RETURN_INPUT:
 	LEA DX, msgPromtBookID
 	INT 21H
 	
-	MOV AH, 0CH
+	MOV AH, 0CH            ; 0CH FLUSH KEYBOARD BUFFER
 	MOV AL, 0
 	INT 21H
 
-	LEA SI, BookID_INPUT
+	LEA SI, BookID_INPUT   ; SI = Destination pointer for string buffer
 	MOV CX, 5
 READ_RET_BK:
 	MOV AH, 01H
@@ -2008,7 +2006,7 @@ READ_RET_BK:
 	; --------------------------------------------------
 	; Step 3: Open borrowed.txt & Locate Transaction
 	; --------------------------------------------------
-	MOV AH, 3DH
+	MOV AH, 3DH            ; 3DH OPEN FILE
 	MOV AL, 2
 	LEA DX, BorrowFILE
 	INT 21H
@@ -2017,7 +2015,7 @@ READ_RET_BK:
 
 OPEN_RET_OK:
 	MOV fileHandle, AX
-	MOV AH, 3FH
+	MOV AH, 3FH            ; 3FH READ FILE
 	MOV BX, fileHandle
 	MOV CX, 1000
 	LEA DX, buffer
@@ -2026,7 +2024,7 @@ OPEN_RET_OK:
 	MOV borrowFileSize, AX
 	MOV CX, AX
 	
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
 	
@@ -2035,7 +2033,7 @@ OPEN_RET_OK:
 	JMP NOT_BORROWED_ERR
 
 SCAN_BORROW_START:
-	LEA SI, buffer
+	LEA SI, buffer         ; SI = Source pointer to buffer
 
 FIND_BORROW_RECORD:
 	CMP CX, 5
@@ -2058,9 +2056,9 @@ SKIP_RET_STRAY:
 	JMP NOT_BORROWED_ERR
 
 MATCH_BORROW_FIELDS:
-	LEA DI, MemberID_INPUT
-	PUSH CX
-	PUSH SI
+	LEA DI, MemberID_INPUT ; DI = Pointer to targeted Member ID
+	PUSH CX                ; PUSH CX: Save remaining array bytes
+	PUSH SI                ; PUSH SI: Save row starting address
 	MOV CX, 5
 COMP_RET_MID:
 	MOV AL, [SI]
@@ -2072,7 +2070,7 @@ COMP_RET_MID:
 	
 	INC SI                      ; Skip ','
 	
-	LEA DI, BookID_INPUT
+	LEA DI, BookID_INPUT   ; DI = Pointer to returned Book ID
 	MOV CX, 5
 COMP_RET_BID:
 	MOV AL, [SI]
@@ -2107,13 +2105,13 @@ COMP_RET_BID:
 	SUB AL, '0'
 	MOV BorrowMonth, AL
 	
-	POP SI                      ; SI = Start of matched record
-	POP CX                      ; CX = Remaining bytes from record start
+	POP SI                      ; POP SI: SI = Start of matched record
+	POP CX                      ; POP CX: CX = Remaining bytes from record start
 	JMP CHECK_LATE_FINE_FIRST
 
 RET_REC_MISMATCH:
-	POP SI
-	POP CX
+	POP SI                 ; POP SI: Record mismatch row start restore
+	POP CX                 ; POP CX: Record mismatch buffer count restore
 
 SKIP_RET_LINE:
 	MOV AL, [SI]
@@ -2132,13 +2130,10 @@ CONT_SKIP_RET_LINE:
 	; --------------------------------------------------
 CHECK_LATE_FINE_FIRST:
 	; PROTECT REGISTERS!
-	; INT 21H AH=2AH overwrites CX with the Year. 
-	; PRINT_NUM overwrites CX with digits.
-	; We MUST safely lock away CX (file bytes) and SI (buffer pointer).
-	PUSH CX
-	PUSH SI
+	PUSH CX                ; PUSH CX: Safeguard file byte count before Date INT
+	PUSH SI                ; PUSH SI: Safeguard buffer pointer
 
-	MOV AH, 2AH
+	MOV AH, 2AH            ; 2AH GET SYSTEM DATE
 	INT 21H
 
 	; Month difference with year wrap support
@@ -2190,8 +2185,8 @@ CHECK_FINE_CALC:
 	JAE BAL_IS_ENOUGH
 
 	; If not enough balance: Restore stack and exit
-	POP SI
-	POP CX
+	POP SI                 ; POP SI: Cleanup pointer
+	POP CX                 ; POP CX: Cleanup array count
 	JMP RET_FINE_UNPAID
 
 BAL_IS_ENOUGH:
@@ -2200,8 +2195,8 @@ BAL_IS_ENOUGH:
 	MOV TempFine, BL  
 	MOV AL, TempFine
 	CALL UPDATE_REPORT_FINE
-	MOV AL, TempFine                 ; <--- 添加：BL里面目前存的是罚款金额
-	CALL UPDATE_REPORT_SPEND   ; <--- 添加：将罚款计入 Total Spend
+	MOV AL, TempFine                 ; Add: BL currently holds the fine amount
+	CALL UPDATE_REPORT_SPEND   ; Add: Add fine to Total Spend
 
 	MOV AH, 09H
 	LEA DX, msgFinePaid
@@ -2218,15 +2213,15 @@ ALLOW_RETURN_NO_FINE:
 
 READY_TO_DELETE:
 	; RESTORE REGISTERS cleanly BEFORE executing file deletion
-	POP SI
-	POP CX
+	POP SI                 ; POP SI: Restore target record address
+	POP CX                 ; POP CX: Restore buffer bytes count
 
 	; --------------------------------------------------
 	; Step 5: Shift & Delete from borrowed.txt (19 Bytes)
 	; --------------------------------------------------
 EXECUTE_FILE_DELETION:
-	MOV DI, SI                  ; DI = Start of matched record
-	ADD SI, 19                  ; SI = Start of next record
+	MOV DI, SI                  ; DI = Start of matched record (Destination for shift)
+	ADD SI, 19                  ; SI = Start of next record (Source for shift)
 	
 	SUB CX, 19
 	CMP CX, 0
@@ -2242,7 +2237,7 @@ SHIFT_BUFFER_LOOP_RET:
 DONE_SHIFTING_DATA:
 	SUB borrowFileSize, 19
 
-	MOV AH, 3CH                 ; Re-create/truncate borrowed.txt
+	MOV AH, 3CH                 ; 3CH CREATE FILE (Re-create/truncate borrowed.txt)
 	MOV CX, 0
 	LEA DX, BorrowFILE
 	INT 21H
@@ -2251,21 +2246,21 @@ DONE_SHIFTING_DATA:
 	CMP borrowFileSize, 0
 	JE  CLOSE_BORROW_FILE
 
-	MOV AH, 40H
+	MOV AH, 40H            ; 40H WRITE DATA TO FILE
 	MOV BX, fileHandle
 	MOV CX, borrowFileSize
 	LEA DX, buffer
 	INT 21H
 
 CLOSE_BORROW_FILE:
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
 
 	; --------------------------------------------------
 	; Step 6: Replenish Book Stock in book.txt (+1)
 	; --------------------------------------------------
-	MOV AH, 3DH
+	MOV AH, 3DH            ; 3DH OPEN FILE
 	MOV AL, 2
 	LEA DX, BookFILE
 	INT 21H
@@ -2278,19 +2273,19 @@ CLOSE_BORROW_FILE:
 OPEN_BOOK_INC_OK:
 	MOV fileHandle, AX
 
-	MOV AH, 3FH
+	MOV AH, 3FH            ; 3FH READ FILE
 	MOV BX, fileHandle
 	MOV CX, 320
 	LEA DX, bookBuffer
 	INT 21H
 
-	LEA SI, bookBuffer
+	LEA SI, bookBuffer     ; SI = Start pointer to book database
 	MOV CX, 10
 
 SCAN_BK_FOR_INC_RET:
-	LEA DI, BookID_INPUT
-	PUSH CX
-	PUSH SI
+	LEA DI, BookID_INPUT   ; DI = Target returned Book ID
+	PUSH CX                ; PUSH CX: Protect outer loop
+	PUSH SI                ; PUSH SI: Save row pointer
 	MOV CX, 5
 COMP_BK_FOR_INC_RET:
 	MOV AL, [SI]
@@ -2301,8 +2296,8 @@ COMP_BK_FOR_INC_RET:
 	LOOP COMP_BK_FOR_INC_RET
 
 	; Increment stock digit at offset 27
-	POP SI
-	POP CX
+	POP SI                 ; POP SI: Matched book record start
+	POP CX                 ; POP CX: Outer loop restore
 	LEA BX, [SI + 27]
 
 	CMP BYTE PTR [BX+2], '9'
@@ -2315,20 +2310,20 @@ INC_SINGLE_DIGIT_RET:
 	INC BYTE PTR [BX+2]
 
 WRITE_UPDATED_BOOK_RET:
-	MOV AH, 42H
+	MOV AH, 42H            ; 42H MOVE FILE POINTER
 	MOV AL, 0
 	MOV BX, fileHandle
 	XOR CX, CX
 	XOR DX, DX
 	INT 21H
 
-	MOV AH, 40H
+	MOV AH, 40H            ; 40H WRITE DATA TO FILE
 	MOV BX, fileHandle
 	MOV CX, 320
 	LEA DX, bookBuffer
 	INT 21H
 
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
 	
@@ -2337,12 +2332,12 @@ WRITE_UPDATED_BOOK_RET:
 	JMP RET_EXIT
 
 NEXT_BK_INC_RET:
-	POP SI
-	POP CX
+	POP SI                 ; POP SI: Restore address on miss
+	POP CX                 ; POP CX: Restore loop count
 	ADD SI, 32
 	LOOP SCAN_BK_FOR_INC_RET
 
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
 	
@@ -2382,16 +2377,16 @@ TOP_UP_START:
 
 SHOW_ERR_INVALID3:
 	MOV AH, 09H
-	LEA DX, msgInvalidNum   ; 显示 Invalid input!
+	LEA DX, msgInvalidNum   ; Display Invalid input!
 	INT 21H
-	MOV TOPUP_STATUS, 0     ; 重置状态
+	MOV TOPUP_STATUS, 0     ; Reset Status
 	JMP CONTINUE_TOPUP
 
 SHOW_ERR_OVERFLOW:
 	MOV AH, 09H
-	LEA DX, msgOverflow     ; 显示 Overflow limit!
+	LEA DX, msgOverflow     ; Display Overflow limit!
 	INT 21H
-	MOV TOPUP_STATUS, 0     ; 重置状态
+	MOV TOPUP_STATUS, 0     ; Reset Status
 	JMP CONTINUE_TOPUP
 
 CONTINUE_TOPUP:
@@ -2401,38 +2396,38 @@ CONTINUE_TOPUP:
 	LEA DX, msgPromtTopup
 	INT 21H
 
-	; === Input Validation Check 1 (十位数) ===
+	; === Input Validation Check 1 (Tens digit) ===
 	MOV AH, 01H
 	INT 21H
-	MOV BL, AL              ; 先存进 BL
+	MOV BL, AL              ; Temporarily store in BL
 	CMP BL, '0'
 	JB  INVALID_TOPUP
 	CMP BL, '9'
 	JA  INVALID_TOPUP
 	
-	; 换算并存入 CH
+	; Convert and store in CH
 	SUB BL, '0'
 	MOV AL, BL
 	MOV CL, 10
 	MUL CL          
-	MOV CH, AL              ; 用 CH 保存十位数值
+	MOV CH, AL              ; Use CH to save tens value
 
-	; === Input Validation Check 2 (个位数) ===
+	; === Input Validation Check 2 (Units digit) ===
 	MOV AH, 01H
 	INT 21H
-	MOV BL, AL              ; 存进 BL
+	MOV BL, AL              ; Store in BL
 	CMP BL, '0'
 	JB  INVALID_TOPUP
 	CMP BL, '9'
 	JA  INVALID_TOPUP
 	
-	MOV AH, 09H             ; <--- 输入两个数字后统一加入换行
+	MOV AH, 09H
 	LEA DX, NL
 	INT 21H
 	
-	; 换算并加总
+	; Convert and sum
 	SUB BL, '0'
-	ADD CH, BL              ; CH = 真正充值的金额 (十位 + 个位)
+	ADD CH, BL              ; CH = Actual top-up amount (Tens + Units)
 
 	; === Value Checking (Carry) ===
 	MOV AL, MemberBalance
@@ -2451,7 +2446,7 @@ CONTINUE_TOPUP:
 	CALL PRINT_BALANCE
 	
 	CALL WAIT_KEY
-	RET                     ; 成功退出
+	RET                     ; Exit successfully
 
 INVALID_TOPUP:
 	MOV TOPUP_STATUS, 1
@@ -2472,50 +2467,46 @@ PRINT_REPORT PROC
     LEA DX, msgRepTitle
     INT 21H
     
-    ; --- 打开 REPORT.TXT ---
-    MOV AH, 3DH
+    ; --- Open REPORT.TXT ---
+    MOV AH, 3DH            ; 3DH OPEN FILE
     MOV AL, 0                  ; Read-only
     LEA DX, RepFILE
     INT 21H
     JNC OPEN_PR_OK
-    JMP NO_REPORT_FOUND        ; 打开失败
+    JMP NO_REPORT_FOUND        ; Open failed
 
 OPEN_PR_OK:
     MOV fileHandle, AX
     
-    ; --- 读取文件到 buffer ---
-    MOV AH, 3FH
+    ; --- Read file to buffer ---
+    MOV AH, 3FH            ; 3FH READ FILE
     MOV BX, fileHandle
     MOV CX, 1000
     LEA DX, buffer
     INT 21H
-    PUSH AX                    ; 保存实际读取字节数
-    POP CX
+    PUSH AX                    ; PUSH AX: Save actual bytes read
+    POP CX                     ; POP CX: Set remaining counter
     
-    MOV AH, 3EH
+    MOV AH, 3EH            ; 3EH CLOSE FILE
     MOV BX, fileHandle
     INT 21H
     
-    ; 检查是否至少读到了 19 字节（一条记录）
+    ; Check if at least 19 bytes (one record) read
     CMP CX, 19
     JAE SCAN_PR
-    ; 文件太小或读取失败，跳转
+    ; File too small or read fail, jump
     JMP NO_REPORT_FOUND
 
-; ===== 调试：显示 buffer 前 20 个字符 =====
-    ; 您可以在 SCAN_PR 之前添加以下代码来检查 buffer 内容
-    ; 但为了简洁，我建议在 DISPLAY_REP_DATA 之前显示
-
 SCAN_PR:
-	LEA SI, buffer
+	LEA SI, buffer         ; SI = Start of read report records
     CMP CX, 5
     JAE COMP_PR_START
     JMP NO_REPORT_FOUND
 
 COMP_PR_START:
-    LEA DI, MemberID_INPUT
-    PUSH CX
-    PUSH SI
+    LEA DI, MemberID_INPUT ; DI = Pointer to Member ID target
+    PUSH CX                ; PUSH CX: Protect outer buffer count
+    PUSH SI                ; PUSH SI: Protect pointer to current row
     MOV CX, 5
 COMP_PR:
     MOV DL, [SI]
@@ -2525,14 +2516,14 @@ COMP_PR:
     INC DI
     LOOP COMP_PR
     
-    ; 匹配成功
-    POP SI
-    POP CX
+    ; Match success
+    POP SI                 ; POP SI: Row match logic starts here
+    POP CX                 ; POP CX: Restore count
     JMP DISPLAY_REP_DATA
 
 NEXT_PR:
-    POP SI
-    POP CX
+    POP SI                 ; POP SI: Miss, restore start
+    POP CX                 ; POP CX: Miss, restore array length
 SKIP_PR_LINE:
     MOV DL, [SI]
     INC SI
@@ -2544,9 +2535,9 @@ CHK_PR_NL:
     JNE SKIP_PR_LINE
     JMP SCAN_PR
 
-; ===== 显示报告数据 =====
+; ===== Show report data =====
 DISPLAY_REP_DATA:
-    ; ===== 显示借书量 =====
+    ; ===== Show borrowed books =====
     MOV AH, 09H
     LEA DX, msgRepBooks
     INT 21H
@@ -2559,7 +2550,7 @@ DISPLAY_REP_DATA:
     MOV DL, [SI+8]
     INT 21H
     
-    ; ===== 显示罚款额 =====
+    ; ===== Show fines =====
     MOV AH, 09H
     LEA DX, msgRepFine
     INT 21H
@@ -2572,7 +2563,7 @@ DISPLAY_REP_DATA:
     MOV DL, [SI+12]
     INT 21H
     
-    ; ===== 显示总花费 =====
+    ; ===== Show total spend =====
     MOV AH, 09H
     LEA DX, msgRepSpe
     INT 21H
@@ -2588,7 +2579,7 @@ DISPLAY_REP_DATA:
     JMP PR_FINISH
 
 NO_REPORT_FOUND:
-    ; 显示 000
+    ; Display 000
     MOV AH, 09H
     LEA DX, msgRepBooks
     INT 21H
@@ -2735,11 +2726,11 @@ PRINT_BALANCE ENDP
 ; ==========================================================
 READ_USERNAME PROC
 	; Flush keyboard buffer first to clear old keystrokes
-	MOV AH, 0CH
+	MOV AH, 0CH            ; 0CH FLUSH KEYBOARD BUFFER
 	MOV AL, 0
 	INT 21H
 
-	LEA SI, MemberID_INPUT
+	LEA SI, MemberID_INPUT ; SI = Destination pointer for User ID
 	MOV CX, 5
 READ_U:
 	MOV AH, 01H
@@ -2757,11 +2748,11 @@ READ_USERNAME ENDP
 ; ==========================================================
 READ_PASSWORD PROC
 	; Flush keyboard buffer so leftover Enter from ID is wiped
-	MOV AH, 0CH
+	MOV AH, 0CH            ; 0CH FLUSH KEYBOARD BUFFER
 	MOV AL, 0
 	INT 21H
 
-	LEA SI, Password_INPUT
+	LEA SI, Password_INPUT ; SI = Destination pointer for Password
 	MOV CX, 5
 READ_P:
 	MOV AH, 01H
@@ -2787,7 +2778,7 @@ WAIT_KEY PROC
 	LEA DX, msgPressAnyKey
 	INT 21H
 
-	MOV AH, 08H
+	MOV AH, 08H            ; 08H READ CHAR NO ECHO
 	INT 21H
 	
 	RET
@@ -2797,16 +2788,16 @@ WAIT_KEY ENDP
 ; (Clear Screen)
 ; ==========================================================
 CLEAR_SCREEN PROC
-	MOV AX, 0600H    ; AH=06H (卷动窗口), AL=00H (清空整个屏幕)
-	MOV BH, 07H      ; BH=07H (颜色属性：黑底白字，如果是 70H 就是白底黑字)
-	MOV CX, 0000H    ; 左上角坐标：行 0, 列 0
-	MOV DX, 184FH    ; 右下角坐标：行 24 (18H), 列 79 (4FH)
-	INT 10H          ; 呼叫 BIOS 视频服务 (注意：这里是 10H，不是 21H！)
+	MOV AX, 0600H    ; AH=06H (Scroll Window), AL=00H (Clear entire screen)
+	MOV BH, 07H      ; BH=07H (Color attr: Black background, white text)
+	MOV CX, 0000H    ; Top-left coordinate: Row 0, Col 0
+	MOV DX, 184FH    ; Bottom-right coordinate: Row 24 (18H), Col 79 (4FH)
+	INT 10H          ; 10H BIOS VIDEO SERVICE
 
-	; 2. 重置光标到左上角 (如果不重置，清屏后字会从屏幕底部开始打)
-	MOV AH, 02H      ; AH=02H (设定光标位置)
-	MOV BH, 00H      ; 第 0 页
-	MOV DX, 0000H    ; 行 0, 列 0
+	; 2. Reset cursor to top-left
+	MOV AH, 02H      ; AH=02H (Set cursor position)
+	MOV BH, 00H      ; Page 0
+	MOV DX, 0000H    ; Row 0, Col 0
 	INT 10H
 	
 	RET
@@ -2817,7 +2808,7 @@ CLEAR_SCREEN ENDP
 ; ==========================================================
 SAVE_USER_DATA PROC
 	; 1. Open account.txt (Read/Write Access AL = 2)
-	MOV AH, 3DH
+	MOV AH, 3DH            ; 3DH OPEN FILE
 	MOV AL, 2
 	LEA DX, AccFILE
 	INT 21H
@@ -2828,21 +2819,21 @@ SAVE_OPEN_OK:
 	MOV fileHandle, AX
 
 	; 2. Read entire file into buffer
-	MOV AH, 3FH
+	MOV AH, 3FH            ; 3FH READ FILE
 	MOV BX, fileHandle
 	MOV CX, 1000
 	LEA DX, buffer
 	INT 21H
 	MOV accFileSize, AX
-	PUSH AX                    ; Total bytes read
-	POP CX                     ; CX = total bytes read
+	PUSH AX                    ; PUSH AX: Total bytes read
+	POP CX                     ; POP CX: CX = total bytes read
 
 	CMP CX, 0
 	JNE SAVE_START_SCAN
 	JMP CLOSE_SAVE_ERR         ; Far jump bridge
 
 SAVE_START_SCAN:
-	LEA SI, buffer
+	LEA SI, buffer         ; SI = Source pointer to account data buffer
 
 FIND_USER_RECORD:
 	CMP CX, 5
@@ -2850,9 +2841,9 @@ FIND_USER_RECORD:
 	JMP CLOSE_SAVE_ERR         ; Far jump bridge
 
 COMPARE_USER_ID_START:
-	LEA DI, MemberID_INPUT
-	PUSH CX
-	PUSH SI
+	LEA DI, MemberID_INPUT ; DI = Pointer to targeted Member ID input
+	PUSH CX                ; PUSH CX: Protect outer array byte count
+	PUSH SI                ; PUSH SI: Protect pointer to current row
 	MOV CX, 5
 COMPARE_USER_ID:
 	MOV AL, [SI]
@@ -2866,13 +2857,13 @@ USER_CHAR_MATCH:
 	LOOP COMPARE_USER_ID
 
 	; Target User Record Located!
-	POP SI
-	POP CX
+	POP SI                 ; POP SI: Matched record address
+	POP CX                 ; POP CX: Outer array count
 	JMP WRITE_USER_FIELDS
 
 RECORD_NOT_TARGET_BRIDGE:
-	POP SI
-	POP CX
+	POP SI                 ; POP SI: Restored mismatch address
+	POP CX                 ; POP CX: Restored array count
 	JMP SKIP_TO_NEXT_USER
 
 WRITE_USER_FIELDS:
@@ -2935,7 +2926,7 @@ WRITE_USER_FIELDS:
 	MOV [SI], AH               ; Units
 
 	; 4. Rewind file pointer back to start of account.txt
-	MOV AH, 42H
+	MOV AH, 42H            ; 42H MOVE FILE POINTER
 	MOV AL, 0                  ; Seek from start (Offset 0)
 	MOV BX, fileHandle
 	XOR CX, CX
@@ -2943,14 +2934,14 @@ WRITE_USER_FIELDS:
 	INT 21H
 
 	; 5. Re-write updated buffer back to file
-	MOV AH, 40H
+	MOV AH, 40H            ; 40H WRITE DATA TO FILE
 	MOV BX, fileHandle
 	MOV CX, accFileSize
 	LEA DX, buffer
 	INT 21H
 
 	; 6. Close file
-	MOV AH, 3EH 
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
 	RET
@@ -2965,7 +2956,7 @@ SKIP_TO_NEXT_USER:
 	JMP FIND_USER_RECORD
 
 CLOSE_SAVE_ERR:
-	MOV AH, 3EH
+	MOV AH, 3EH            ; 3EH CLOSE FILE
 	MOV BX, fileHandle
 	INT 21H
 
