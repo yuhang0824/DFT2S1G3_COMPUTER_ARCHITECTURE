@@ -123,16 +123,19 @@
 
 	MemberID_INPUT DB 5 DUP(?)
 	Password_INPUT DB 5 DUP(?)
+	UserTotalBooks DW 0      ; New memory tracker
+	UserTotalFine  DW 0      ; New memory tracker
+	UserTotalSpend DW 0      ; New memory tracker
 	
-	RegRecord      DB 25 DUP(?)
+	RegRecord      DB 37 DUP(?)
 	; Separate dedicated buffer for 20 books 
 	bookBuffer     DB 2048 DUP(?)
 	; Standard buffer for account/borrowed records
 	buffer         DB 1024 DUP(?)
 	
 	AccFILE     DB 'ACCOUNT.TXT', 0
-	logMsg      DB 'M0001,12345,050,N,00,00', 13, 10
-	msgLen      DW 24
+	logMsg      DB 'M0001,12345,050,N,00,00,000,000,000', 13, 10
+	msgLen      DW 37
 	fileHandle  DW ?
 	accFileSize DW 0
 	
@@ -390,9 +393,84 @@ EXTRACT_BAL_FIELDS:
 	ADD AL, [SI]
 	SUB AL, '0'
 	MOV ExpiryMonth, AL
+	
+	INC SI                     ; Skip to comma
+	INC SI                     ; Skip to Books data
 
-	POP SI                   ; POP SI: Restore buffer pointer to start of this user's row
-	POP CX                   ; POP CX: Restore buffer remaining bytes counter
+	; --- 1. Extract Total Books (3 digits) ---
+	MOV AL, [SI]
+	SUB AL, '0'
+	MOV AH, 0
+	MOV BX, 100
+	MUL BX
+	MOV UserTotalBooks, AX     ; Hundreds
+	INC SI
+	
+	MOV AL, [SI]
+	SUB AL, '0'
+	MOV AH, 0
+	MOV BX, 10
+	MUL BX
+	ADD UserTotalBooks, AX     ; Tens
+	INC SI
+	
+	MOV AL, [SI]
+	SUB AL, '0'
+	MOV AH, 0
+	ADD UserTotalBooks, AX     ; Units
+	
+	INC SI                     ; Skip to comma
+	INC SI                     ; Skip to Fines data
+	
+	; --- 2. Extract Total Fines (3 digits) ---
+	MOV AL, [SI]
+	SUB AL, '0'
+	MOV AH, 0
+	MOV BX, 100
+	MUL BX
+	MOV UserTotalFine, AX
+	INC SI
+	
+	MOV AL, [SI]
+	SUB AL, '0'
+	MOV AH, 0
+	MOV BX, 10
+	MUL BX
+	ADD UserTotalFine, AX
+	INC SI
+	
+	MOV AL, [SI]
+	SUB AL, '0'
+	MOV AH, 0
+	ADD UserTotalFine, AX
+	
+	INC SI                     ; Skip to comma
+	INC SI                     ; Skip to Spend data
+	
+	; --- 3. Extract Total Spend (3 digits) ---
+	MOV AL, [SI]
+	SUB AL, '0'
+	MOV AH, 0
+	MOV BX, 100
+	MUL BX
+	MOV UserTotalSpend, AX
+	INC SI
+	
+	MOV AL, [SI]
+	SUB AL, '0'
+	MOV AH, 0
+	MOV BX, 10
+	MUL BX
+	ADD UserTotalSpend, AX
+	INC SI
+	
+	MOV AL, [SI]
+	SUB AL, '0'
+	MOV AH, 0
+	ADD UserTotalSpend, AX
+
+	POP SI                     ; Restore buffer pointer
+	POP CX                     ; Restore buffer bytes counter
 
 	; Check subscription validity against current date
 	CALL CHECK_EXPIRY_STATUS
@@ -712,64 +790,90 @@ COPY_REG_PASS:
 	MOV BYTE PTR [DI], '0'
 	INC DI
 	
+	MOV BYTE PTR [DI], ','
+	INC DI
+	
+	; --- New Initial Trackers ---
+	; Books = '000'
+	MOV BYTE PTR [DI], '0'
+	INC DI
+	MOV BYTE PTR [DI], '0'
+	INC DI
+	MOV BYTE PTR [DI], '0'
+	INC DI
+	MOV BYTE PTR [DI], ','
+	INC DI
+	
+	; Fines = '000'
+	MOV BYTE PTR [DI], '0'
+	INC DI
+	MOV BYTE PTR [DI], '0'
+	INC DI
+	MOV BYTE PTR [DI], '0'
+	INC DI
+	MOV BYTE PTR [DI], ','
+	INC DI
+	
+	; Spend = '000'
+	MOV BYTE PTR [DI], '0'
+	INC DI
+	MOV BYTE PTR [DI], '0'
+	INC DI
+	MOV BYTE PTR [DI], '0'
+	INC DI
+
 	; Add CRLF
 	MOV BYTE PTR [DI], 13       ; CR
 	INC DI
 	MOV BYTE PTR [DI], 10       ; LF
 	
-	; 4. Open account.txt (Read/Write Access: AL = 2)
-	MOV AH, 3DH            ; 3DH OPEN FILE
+	; 4. Open account.txt
+	MOV AH, 3DH
 	MOV AL, 2
 	LEA DX, AccFILE
 	INT 21H
 	JNC OPEN_REG_OK
 
 	; Create file if missing
-	MOV AH, 3CH            ; 3CH CREATE FILE
+	MOV AH, 3CH
 	MOV CX, 0
 	LEA DX, AccFILE
 	INT 21H
 	JNC OPEN_REG_OK
 	JMP REG_FILE_ERROR
-	
 
 OPEN_REG_OK:
 	MOV fileHandle, AX
 
-	; 5. Seek to End of File (AL = 2, CX:DX = 0)
-	MOV AH, 42H            ; 42H MOVE FILE POINTER
-	MOV AL, 2              ; Move from EOF
+	; 5. Seek to End of File
+	MOV AH, 42H
+	MOV AL, 2
 	MOV BX, fileHandle
-	XOR CX, CX			   ; CX = 0 (High word of offset - means move 0 bytes)
-	XOR DX, DX			   ; DX = 0 (Low word of offset - means move 0 bytes)
+	XOR CX, CX
+	XOR DX, DX
 	INT 21H
 	JNC WRITE_REGISTER_RECORD
 	JMP REG_FILE_ERROR
 
 WRITE_REGISTER_RECORD:
-	; 6. Append 24-byte record (Single write)
-	MOV AH, 40H            ; 40H WRITE DATA TO FILE
+	; 6. Append new 37-byte record
+	MOV AH, 40H
 	MOV BX, fileHandle
-	MOV CX, 25
+	MOV CX, 37                 ; <--- UPDATED TO 37 BYTES
 	LEA DX, RegRecord
 	INT 21H
 	JNC CLOSE_ACCOUNT_FILE
 	JMP REG_FILE_ERROR
 	
 CLOSE_ACCOUNT_FILE:
-	; 7. Close file handle
-	MOV AH, 3EH            ; 3EH CLOSE FILE
+	MOV AH, 3EH
 	MOV BX, fileHandle
 	INT 21H
-
-	; ==========================================================
-	; Initialize REPORT.TXT for the new member
-	; ==========================================================
-	LEA DI, repInitRecord  ; DI = Pointer to init record buffer
 	
-	; 1. Copy newly registered Member ID (5 bytes)
-	LEA SI, MemberID_INPUT ; SI = Pointer to inputted ID
-	MOV CX, 5
+	MOV AH, 09H
+	LEA DX, msgRegSuccess
+	INT 21H
+	JMP REG_DONE
 COPY_REP_ID:
 	MOV AL, [SI]
 	MOV [DI], AL
@@ -1329,8 +1433,7 @@ SUB_BRONZE:
 	CMP MemberBalance, 50
 	JB  SUB_NO_MONEY
 	SUB MemberBalance, 50
-	MOV AL, 50                 ; Add: Put spent amount into AL
-	CALL UPDATE_REPORT_SPEND   ; Add: Call update report function
+	ADD UserTotalSpend, 50
 	MOV MemberTier, 'B'
 	JMP SET_EXPIRY_DATE
 
@@ -1338,8 +1441,7 @@ SUB_SILVER:
 	CMP MemberBalance, 75
 	JB  SUB_NO_MONEY
 	SUB MemberBalance, 75
-	MOV AL, 75                 ; Add: Put spent amount into AL
-	CALL UPDATE_REPORT_SPEND   ; Add: Call update report function
+	ADD UserTotalSpend, 75
 	MOV MemberTier, 'S'
 	JMP SET_EXPIRY_DATE
 
@@ -1347,8 +1449,7 @@ SUB_GOLD:
 	CMP MemberBalance, 100
 	JB  SUB_NO_MONEY
 	SUB MemberBalance, 100
-	MOV AL, 100                ; Add: Put spent amount into AL
-	CALL UPDATE_REPORT_SPEND   ; Add: Call update report function
+	ADD UserTotalSpend, 100
 	MOV MemberTier, 'G'
 	JMP SET_EXPIRY_DATE
 
@@ -1384,400 +1485,12 @@ MONTH_OK:
 SUBSCRIBE_TIER ENDP
 
 ; ==========================================================
-; Update User's Total Spend in REPORT.TXT
-; Input: AL = Amount spent (RM)
-; ==========================================================
-UPDATE_REPORT_SPEND PROC
-	PUSH AX                ; PUSH AX: Save spent amount    
-	MOV AH, 3DH            ; 3DH OPEN FILE
-	MOV AL, 2
-	LEA DX, RepFILE
-	INT 21H
-	JNC URS_OPEN_OK
-	JMP URS_ERR                ; <--- Bridge Jump
-URS_OPEN_OK:
-	MOV fileHandle, AX
-
-	MOV AH, 3FH            ; 3FH READ FILE
-	MOV BX, fileHandle
-	MOV CX, 1000
-	LEA DX, buffer
-	INT 21H
-	MOV repFileSize, AX
-	PUSH AX                ; PUSH AX: Save bytes read
-	POP CX                 ; POP CX: Restore into CX
-	
-	CMP CX, 0
-	JNE URS_FIND
-	JMP URS_CLOSE              ; <--- Bridge Jump
-
-URS_FIND:
-	LEA SI, buffer         ; SI = Source pointer to read buffer
-
-
-URS_FIND_LOOP:
-    CMP CX, 5
-    JAE URS_COMP_START
-    JMP URS_CLOSE             ; <--- Bridge Jump
-
-URS_COMP_START:
-	LEA DI, MemberID_INPUT ; DI = Pointer to matched member ID
-	PUSH CX                ; PUSH CX: Save remaining loop bytes
-	PUSH SI                ; PUSH SI: Save row pointer
-	MOV CX, 5
-URS_COMP:
-	MOV DL, [SI]
-	CMP DL, [DI]
-	JNE URS_NEXT
-	INC SI
-	INC DI
-	LOOP URS_COMP
-	
-	POP SI                 ; POP SI: Row pointer
-	POP CX                 ; POP CX: Remaining bytes
-	JMP URS_UPDATE
-
-URS_NEXT:
-	POP SI                 ; POP SI: Restore start row
-	POP CX                 ; POP CX: Restore buffer remainder
-URS_SKIP_LINE:
-	MOV DL, [SI]
-	INC SI
-	DEC CX
-	JNZ URS_CHK_NL
-	JMP URS_CLOSE              ; <--- Bridge Jump
-URS_CHK_NL:
-	CMP DL, 10                 
-	JNE URS_SKIP_LINE
-	JMP URS_FIND_LOOP
-
-URS_UPDATE:
-	ADD SI, 14
-	
-	MOV AL, [SI]
-	SUB AL, '0'
-	MOV AH, 0
-	MOV CX, 100
-	MUL CX                     
-	MOV BX, AX                 
-
-	MOV AL, [SI+1]
-	SUB AL, '0'
-	MOV AH, 0
-	MOV CX, 10
-	MUL CX                     
-	ADD BX, AX
-
-	MOV AL, [SI+2]
-	SUB AL, '0'
-	MOV AH, 0
-	ADD BX, AX                 
-
-	POP AX                     ; POP AX: Restore spent amount
-	PUSH AX                    ; PUSH AX: Re-save spent amount
-	MOV AH, 0
-	ADD AX, BX                 
-
-	MOV CX, 100
-	MOV DX, 0
-	DIV CX                     
-	ADD AL, '0'
-	MOV [SI], AL               
-
-	MOV AX, DX                 
-	MOV CL, 10
-	DIV CL                     
-	ADD AL, '0'
-	MOV [SI+1], AL             
-	ADD AH, '0'
-	MOV [SI+2], AH             
-
-	MOV AH, 42H            ; 42H MOVE FILE POINTER
-	MOV AL, 0                  
-	MOV BX, fileHandle
-	XOR CX, CX
-	XOR DX, DX
-	INT 21H
-
-	MOV AH, 40H            ; 40H WRITE DATA TO FILE
-	MOV BX, fileHandle
-	MOV CX, repFileSize
-	LEA DX, buffer
-	INT 21H
-	
-	CMP AX, CX
-	JE  URS_WRITE_OK
-	MOV AH, 09H
-	LEA DX, msgWriteFail
-	INT 21H
-	JMP URS_CLOSE
-	
-	URS_WRITE_OK:
-		
-URS_CLOSE:
-	MOV AH, 3EH            ; 3EH CLOSE FILE
-	MOV BX, fileHandle
-	INT 21H
-URS_ERR:
-	POP AX                 ; POP AX: Final stack clean for spent amount
-	RET
-UPDATE_REPORT_SPEND ENDP
-
-; ==========================================================
-; Update User's Borrowed Books in REPORT.TXT
+; Update User's Borrowed Books 
 ; ==========================================================
 UPDATE_REPORT_BOOKS PROC
-	PUSH AX                ; PUSH AX: Protect AX data
-	MOV AH, 3DH            ; 3DH OPEN FILE
-	MOV AL, 2
-	LEA DX, RepFILE
-	INT 21H
-	JNC URB_OPEN_OK
-	JMP URB_ERR
-URB_OPEN_OK:
-	MOV fileHandle, AX
-
-	MOV AH, 3FH            ; 3FH READ FILE
-	MOV BX, fileHandle
-	MOV CX, 1000
-	LEA DX, buffer
-	INT 21H
-	MOV repFileSize, AX
-	PUSH AX                ; PUSH AX: Bytes read
-	POP CX                 ; POP CX: Buffer count
-	
-	CMP CX, 0
-	JNE URB_FIND
-	JMP URB_CLOSE
-
-URB_FIND:
-	LEA SI, buffer         ; SI = Source pointer to buffer
-URB_FIND_LOOP:
-	CMP CX, 5
-	JAE URB_COMP_START
-	JMP URB_CLOSE
-
-URB_COMP_START:
-	LEA DI, MemberID_INPUT ; DI = Pointer to target ID
-	PUSH CX                ; PUSH CX: Buffer bytes
-	PUSH SI                ; PUSH SI: Row start
-	MOV CX, 5
-URB_COMP:
-	MOV DL, [SI]
-	CMP DL, [DI]
-	JNE URB_NEXT
-	INC SI
-	INC DI
-	LOOP URB_COMP
-	
-	POP SI                 ; POP SI: Row match pointer
-	POP CX                 ; POP CX: Buffer bytes remaning
-	JMP URB_UPDATE
-
-URB_NEXT:
-	POP SI                 ; POP SI: Row fail start
-	POP CX                 ; POP CX: Buffer bytes remaining
-URB_SKIP_LINE:
-	MOV DL, [SI]
-	INC SI
-	DEC CX
-	JNZ URB_CHK_NL
-	JMP URB_CLOSE
-URB_CHK_NL:
-	CMP DL, 10
-	JNE URB_SKIP_LINE
-	JMP URB_FIND_LOOP
-
-URB_UPDATE:
-	ADD SI, 6
-	
-	MOV AL, [SI]
-	SUB AL, '0'
-	MOV AH, 0
-	MOV CX, 100
-	MUL CX
-	MOV BX, AX
-
-	MOV AL, [SI+1]
-	SUB AL, '0'
-	MOV AH, 0
-	MOV CX, 10
-	MUL CX
-	ADD BX, AX
-
-	MOV AL, [SI+2]
-	SUB AL, '0'
-	MOV AH, 0
-	ADD BX, AX
-
-	POP AX                 ; POP AX: Restore protected data
-	PUSH AX                ; PUSH AX: Save again
-	MOV AH, 0
-	ADD AX, BX
-
-	MOV CX, 100
-	MOV DX, 0
-	DIV CX
-	ADD AL, '0'
-	MOV [SI], AL
-
-	MOV AX, DX
-	MOV CL, 10
-	DIV CL
-	ADD AL, '0'
-	MOV [SI+1], AL
-	ADD AH, '0'
-	MOV [SI+2], AH
-
-	MOV AH, 42H            ; 42H MOVE FILE POINTER
-	MOV AL, 0
-	MOV BX, fileHandle
-	XOR CX, CX
-	XOR DX, DX
-	INT 21H
-
-	MOV AH, 40H            ; 40H WRITE DATA TO FILE
-	MOV BX, fileHandle
-	MOV CX, repFileSize
-	LEA DX, buffer
-	INT 21H
-
-URB_CLOSE:
-	MOV AH, 3EH            ; 3EH CLOSE FILE
-	MOV BX, fileHandle
-	INT 21H
-URB_ERR:
-	POP AX                 ; POP AX: Final stack clean
-	RET
+	INC UserTotalBooks
+	CALL SAVE_USER_DATA
 UPDATE_REPORT_BOOKS ENDP
-
-; ==========================================================
-; Update User's Fines in REPORT.TXT
-; ==========================================================
-UPDATE_REPORT_FINE PROC
-	PUSH AX                ; PUSH AX: Save fine amount
-	MOV AH, 3DH            ; 3DH OPEN FILE
-	MOV AL, 2
-	LEA DX, RepFILE
-	INT 21H
-	JNC URF_OPEN_OK
-	JMP URF_ERR
-URF_OPEN_OK:
-	MOV fileHandle, AX
-
-	MOV AH, 3FH            ; 3FH READ FILE
-	MOV BX, fileHandle
-	MOV CX, 1000
-	LEA DX, buffer
-	INT 21H
-	MOV repFileSize, AX
-	PUSH AX                ; PUSH AX: Save bytes read
-	POP CX                 ; POP CX: Set buffer bytes counter
-	
-	CMP CX, 0
-	JNE URF_FIND
-	JMP URF_CLOSE
-
-URF_FIND:
-	LEA SI, buffer         ; SI = Buffer source pointer
-URF_FIND_LOOP:
-	CMP CX, 5
-	JAE URF_COMP_START
-	JMP URF_CLOSE
-
-URF_COMP_START:
-	LEA DI, MemberID_INPUT ; DI = Target ID pointer
-	PUSH CX                ; PUSH CX: Save buffer counter
-	PUSH SI                ; PUSH SI: Save line pointer
-	MOV CX, 5
-URF_COMP:
-	MOV DL, [SI]
-	CMP DL, [DI]
-	JNE URF_NEXT
-	INC SI
-	INC DI
-	LOOP URF_COMP
-	
-	POP SI                 ; POP SI: Matched row pointer
-	POP CX                 ; POP CX: Buffer count
-	JMP URF_UPDATE
-
-URF_NEXT:
-	POP SI                 ; POP SI: Restore row start
-	POP CX                 ; POP CX: Restore buffer count
-URF_SKIP_LINE:
-	MOV DL, [SI]
-	INC SI
-	DEC CX
-	JNZ URF_CHK_NL
-	JMP URF_CLOSE
-URF_CHK_NL:
-	CMP DL, 10
-	JNE URF_SKIP_LINE
-	JMP URF_FIND_LOOP
-
-URF_UPDATE:
-	ADD SI, 10
-	
-	MOV AL, [SI]
-	SUB AL, '0'
-	MOV AH, 0
-	MOV CX, 100
-	MUL CX
-	MOV BX, AX
-
-	MOV AL, [SI+1]
-	SUB AL, '0'
-	MOV AH, 0
-	MOV CX, 10
-	MUL CX
-	ADD BX, AX
-
-	MOV AL, [SI+2]
-	SUB AL, '0'
-	MOV AH, 0
-	ADD BX, AX
-
-	POP AX                 ; POP AX: Restore fine amount
-	PUSH AX                ; PUSH AX: Save again
-	MOV AH, 0
-	ADD AX, BX
-
-	MOV CX, 100
-	MOV DX, 0
-	DIV CX
-	ADD AL, '0'
-	MOV [SI], AL
-
-	MOV AX, DX
-	MOV CL, 10
-	DIV CL
-	ADD AL, '0'
-	MOV [SI+1], AL
-	ADD AH, '0'
-	MOV [SI+2], AH
-
-	MOV AH, 42H            ; 42H MOVE FILE POINTER
-	MOV AL, 0
-	MOV BX, fileHandle
-	XOR CX, CX
-	XOR DX, DX
-	INT 21H
-
-	MOV AH, 40H            ; 40H WRITE DATA TO FILE
-	MOV BX, fileHandle
-	MOV CX, repFileSize
-	LEA DX, buffer
-	INT 21H
-
-URF_CLOSE:
-	MOV AH, 3EH            ; 3EH CLOSE FILE
-	MOV BX, fileHandle
-	INT 21H
-URF_ERR:
-	POP AX                 ; POP AX: Clean fine amount from stack
-	RET
-UPDATE_REPORT_FINE ENDP
 
 ; ==========================================================
 ; EXPIRY CHECK ROUTINE
@@ -2190,21 +1903,28 @@ CHECK_FINE_CALC:
 	JMP RET_FINE_UNPAID
 
 BAL_IS_ENOUGH:
-	; Deduct fine & update memory variables
+	; 1. Deduct fine & temporarily save it for printing
 	SUB MemberBalance, BL
 	MOV TempFine, BL  
-	MOV AL, TempFine
-	CALL UPDATE_REPORT_FINE
-	MOV AL, TempFine                 ; Add: BL currently holds the fine amount
-	CALL UPDATE_REPORT_SPEND   ; Add: Add fine to Total Spend
-
+	
+	; 2. Add fine to memory trackers (No more slow file I/O!)
+	MOV AL, BL
+	MOV AH, 0
+	ADD UserTotalFine, AX
+	
+	ADD UserTotalSpend, AX
+	
+	; 3. --- PRINT FINE RECEIPT ---
 	MOV AH, 09H
 	LEA DX, msgFinePaid
 	INT 21H
+	
 	MOV AL, TempFine
-	CALL PRINT_NUM
-	CALL PRINT_BALANCE
-	JMP READY_TO_DELETE
+	CALL PRINT_NUM             ; Print the fine amount deducted
+	CALL PRINT_BALANCE         ; Show them their newly reduced balance
+	
+	; 4. --- SKIP THE NO FINE MESSAGE ---
+	JMP READY_TO_DELETE        
 
 ALLOW_RETURN_NO_FINE:
 	MOV AH, 09H
@@ -2458,153 +2178,42 @@ OVERFLOW_TOPUP:
 TOP_UP ENDP
 
 ; ==========================================================
-; 5. Personal Summary Report (Reads from REPORT.TXT)
+; 5. Personal Summary Report
 ; ==========================================================
 PRINT_REPORT PROC
-    CALL CLEAR_SCREEN
-    
-    MOV AH, 09H
-    LEA DX, msgRepTitle
-    INT 21H
-    
-    ; --- Open REPORT.TXT ---
-    MOV AH, 3DH            ; 3DH OPEN FILE
-    MOV AL, 0                  ; Read-only
-    LEA DX, RepFILE
-    INT 21H
-    JNC OPEN_PR_OK
-    JMP NO_REPORT_FOUND        ; Open failed
-
-OPEN_PR_OK:
-    MOV fileHandle, AX
-    
-    ; --- Read file to buffer ---
-    MOV AH, 3FH            ; 3FH READ FILE
-    MOV BX, fileHandle
-    MOV CX, 1000
-    LEA DX, buffer
-    INT 21H
-    PUSH AX                    ; PUSH AX: Save actual bytes read
-    POP CX                     ; POP CX: Set remaining counter
-    
-    MOV AH, 3EH            ; 3EH CLOSE FILE
-    MOV BX, fileHandle
-    INT 21H
-    
-    ; Check if at least 19 bytes (one record) read
-    CMP CX, 19
-    JAE SCAN_PR
-    ; File too small or read fail, jump
-    JMP NO_REPORT_FOUND
-
-SCAN_PR:
-	LEA SI, buffer         ; SI = Start of read report records
-    CMP CX, 5
-    JAE COMP_PR_START
-    JMP NO_REPORT_FOUND
-
-COMP_PR_START:
-    LEA DI, MemberID_INPUT ; DI = Pointer to Member ID target
-    PUSH CX                ; PUSH CX: Protect outer buffer count
-    PUSH SI                ; PUSH SI: Protect pointer to current row
-    MOV CX, 5
-COMP_PR:
-    MOV DL, [SI]
-    CMP DL, [DI]
-    JNE NEXT_PR
-    INC SI
-    INC DI
-    LOOP COMP_PR
-    
-    ; Match success
-    POP SI                 ; POP SI: Row match logic starts here
-    POP CX                 ; POP CX: Restore count
-    JMP DISPLAY_REP_DATA
-
-NEXT_PR:
-    POP SI                 ; POP SI: Miss, restore start
-    POP CX                 ; POP CX: Miss, restore array length
-SKIP_PR_LINE:
-    MOV DL, [SI]
-    INC SI
-    DEC CX
-    JNZ CHK_PR_NL
-    JMP NO_REPORT_FOUND
-CHK_PR_NL:
-    CMP DL, 10
-    JNE SKIP_PR_LINE
-    JMP SCAN_PR
-
-; ===== Show report data =====
-DISPLAY_REP_DATA:
-    ; ===== Show borrowed books =====
-    MOV AH, 09H
-    LEA DX, msgRepBooks
-    INT 21H
-    
-    MOV AH, 02H
-    MOV DL, [SI+6]
-    INT 21H
-    MOV DL, [SI+7]
-    INT 21H
-    MOV DL, [SI+8]
-    INT 21H
-    
-    ; ===== Show fines =====
-    MOV AH, 09H
-    LEA DX, msgRepFine
-    INT 21H
-    
-    MOV AH, 02H
-    MOV DL, [SI+10]
-    INT 21H
-    MOV DL, [SI+11]
-    INT 21H
-    MOV DL, [SI+12]
-    INT 21H
-    
-    ; ===== Show total spend =====
-    MOV AH, 09H
-    LEA DX, msgRepSpe
-    INT 21H
-    
-    MOV AH, 02H
-    MOV DL, [SI+14]
-    INT 21H
-    MOV DL, [SI+15]
-    INT 21H
-    MOV DL, [SI+16]
-    INT 21H
-    
-    JMP PR_FINISH
-
-NO_REPORT_FOUND:
-    ; Display 000
-    MOV AH, 09H
-    LEA DX, msgRepBooks
-    INT 21H
-    MOV AL, 0
-    CALL PRINT_NUM
-    
-    MOV AH, 09H
-    LEA DX, msgRepFine
-    INT 21H
-    MOV AL, 0
-    CALL PRINT_NUM
-    
-    MOV AH, 09H
-    LEA DX, msgRepSpe
-    INT 21H
-    MOV AL, 0
-    CALL PRINT_NUM
-
-PR_FINISH:
-    MOV AH, 09H
-    LEA DX, msgRepLine
-    INT 21H
-    
-    CALL WAIT_KEY
-    RET
+	CALL CLEAR_SCREEN
+	
+	MOV AH, 09H
+	LEA DX, msgRepTitle
+	INT 21H
+	
+	; ===== Show borrowed books =====
+	MOV AH, 09H
+	LEA DX, msgRepBooks
+	INT 21H
+	MOV AX, UserTotalBooks
+	CALL PRINT_NUM
+	
+	; ===== Show fines =====
+	MOV AH, 09H
+	LEA DX, msgRepFine
+	INT 21H
+	MOV AX, UserTotalFine
+	CALL PRINT_NUM
+	
+	; ===== Show total spend =====
+	MOV AH, 09H
+	LEA DX, msgRepSpe
+	INT 21H
+	MOV AX, UserTotalSpend
+	CALL PRINT_NUM
+	
+	MOV AH, 09H
+	LEA DX, msgRepLine
+	INT 21H
+	
+	CALL WAIT_KEY
+	RET
 PRINT_REPORT ENDP
 
 PRINT_USER_STATUS PROC
@@ -2922,6 +2531,72 @@ WRITE_USER_FIELDS:
 	ADD AL, '0'
 	MOV [SI], AL               ; Tens
 	INC SI
+	ADD AH, '0'
+	MOV [SI], AH               ; Units
+	
+	INC SI                     ; Skip to comma
+	INC SI                     ; Skip to Books data
+
+	; --- Overwrite Total Books (3 Digits) ---
+	MOV AX, UserTotalBooks
+	MOV BL, 100
+	DIV BL
+	ADD AL, '0'
+	MOV [SI], AL               ; Hundreds
+	INC SI
+
+	MOV AL, AH
+	MOV AH, 0
+	MOV BL, 10
+	DIV BL
+	ADD AL, '0'
+	MOV [SI], AL               ; Tens
+	INC SI
+
+	ADD AH, '0'
+	MOV [SI], AH               ; Units
+	
+	INC SI                     ; Skip to comma
+	INC SI                     ; Skip to Fines data
+
+	; --- Overwrite Total Fine (3 Digits) ---
+	MOV AX, UserTotalFine
+	MOV BL, 100
+	DIV BL
+	ADD AL, '0'
+	MOV [SI], AL               ; Hundreds
+	INC SI
+
+	MOV AL, AH
+	MOV AH, 0
+	MOV BL, 10
+	DIV BL
+	ADD AL, '0'
+	MOV [SI], AL               ; Tens
+	INC SI
+
+	ADD AH, '0'
+	MOV [SI], AH               ; Units
+	
+	INC SI                     ; Skip to comma
+	INC SI                     ; Skip to Spend data
+
+	; --- Overwrite Total Spend (3 Digits) ---
+	MOV AX, UserTotalSpend
+	MOV BL, 100
+	DIV BL
+	ADD AL, '0'
+	MOV [SI], AL               ; Hundreds
+	INC SI
+
+	MOV AL, AH
+	MOV AH, 0
+	MOV BL, 10
+	DIV BL
+	ADD AL, '0'
+	MOV [SI], AL               ; Tens
+	INC SI
+
 	ADD AH, '0'
 	MOV [SI], AH               ; Units
 
