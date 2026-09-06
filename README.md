@@ -9,13 +9,33 @@ For my function 1 ~ 3
 8. exit
 9. status change
 
-Some tools
-1. REGISTER_MEMBER, register program
-2. PRINT_NUM, can print 3 digits
-3. PRINT_BALANCE, print balance
-4. READ_USERNAME and READ_PASSWORD, can store 5 digits
-5. WAIT_KEY, change page when user press any key
-6. CLEAR_SCREEN, clean screen
+
+Core System & Menu Functions
+MAIN: The main entry point of the program; handles screen routing, login, and the main menu switch case.
+REGISTER_MEMBER: Handles new user registration, validates ID format (Mxxxx), checks for duplicates, and initializes records.
+BORROW_BOOK: Manages book catalog display, stock decrement, borrowing eligibility, and records the transaction.
+SUBSCRIBE_TIER: Processes membership purchases (Bronze, Silver, Gold), deducts balance, and sets the 30-day expiry.
+RETURN_BOOK: Scans for borrowed books, calculates overdue days, deducts late fines, restores book stock, and clears the borrow record.
+TOP_UP: Handles wallet balance top-ups and validates numeric input to prevent overflow.
+PRINT_REPORT: Parses REPORT.TXT to display the user's lifetime borrowed books, total fines, and total spending.
+
+File & Data Management Helpers
+UPDATE_REPORT_SPEND: Helper to add expenses (subscriptions/fines) to the user's total spend record.
+UPDATE_REPORT_BOOKS: Helper to increment the user's total borrowed books count.
+UPDATE_REPORT_FINE: Helper to add paid fines to the user's historical fine record.
+CHECK_EXPIRY_STATUS: Compares the system date against the user's expiry date and resets the tier to 'NONE' if expired.
+SAVE_USER_DATA: Locates the current user in ACCOUNT.TXT and overwrites their balance, tier, and expiry date with updated values.
+
+UI & Utility Helpers
+PRINT_USER_STATUS: Displays the active user's current balance, tier name, and expiry date on the main menu.
+PRINT_BALANCE: Fetches and prints the user's current wallet balance (RM).
+PRINT_NUM: Converts numeric data into ASCII characters and prints up to 3 digits (e.g., balances).
+PRINT_2DIGIT: Specifically formats and prints 2-digit numbers (used for DD/MM formatting).
+READ_USERNAME: Safely captures exactly 5 characters for the Member ID and clears keyboard buffers.
+READ_PASSWORD: Safely captures exactly 5 characters for the password, ignoring accidental Enter presses.
+
+WAIT_KEY: Prompts "Press any key to continue..." and pauses program execution.
+CLEAR_SCREEN: Triggers BIOS interrupt 10H to clear the console and reset the cursor to the top-left corner.
 
 open windows cmd
 
